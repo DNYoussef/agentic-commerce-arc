@@ -1,0 +1,99 @@
+name: Smart Contract Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+
+jobs:
+  foundry-tests:
+    name: Foundry Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Check Foundry version
+        run: |
+          forge --version
+          anvil --version
+          cast --version
+
+      - name: Install dependencies
+        run: |
+          cd contracts
+          forge install
+
+      - name: Build contracts
+        run: |
+          cd contracts
+          forge build --sizes
+        id: build
+
+      - name: Run tests
+        run: |
+          cd contracts
+          forge test -vvv
+        env:
+          FOUNDRY_PROFILE: ci
+
+      - name: Run coverage
+        run: |
+          cd contracts
+          forge coverage --report lcov
+        continue-on-error: true
+
+      - name: Gas report
+        run: |
+          cd contracts
+          forge test --gas-report
+        continue-on-error: true
+
+      - name: Run Slither static analysis
+        uses: crytic/slither-action@v0.4.0
+        with:
+          target: 'contracts/'
+          fail-on: 'none'
+        continue-on-error: true
+
+  contract-security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    needs: foundry-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run forge fmt check
+        run: |
+          cd contracts
+          forge fmt --check || echo "Formatting issues found"
+
+      - name: Check for common vulnerabilities
+        run: |
+          cd contracts
+          echo "Running security checks..."
+          # Check for reentrancy patterns
+          grep -r "call{" src/ && echo "Warning: External calls found - verify reentrancy guards" || echo "No raw calls found"
+          # Check for tx.origin usage
+          grep -r "tx.origin" src/ && echo "Warning: tx.origin usage found" || echo "No tx.origin usage"
+          echo "Security scan complete"

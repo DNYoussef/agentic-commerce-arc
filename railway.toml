@@ -1,0 +1,26 @@
+# ==============================================
+# Agentic Commerce on Arc - Railway Configuration
+# ==============================================
+# This file provides additional Railway deployment settings
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+numReplicas = 1
+sleepApplication = false
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+
+# Backend Service Configuration
+# Use: railway up --service backend
+[services.backend]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+
+# Frontend Service Configuration
+# Use: railway up --service frontend
+[services.frontend]
+healthcheckPath = "/"
