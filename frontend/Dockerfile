@@ -1,24 +1,25 @@
 # ==============================================
 # Agentic Commerce Frontend - Dockerfile
 # ==============================================
-# Multi-stage build for optimized production image
+# Multi-stage build for Next.js 14 with standalone output
 
 # ----------------------------------------------
 # Stage 1: Dependencies
 # ----------------------------------------------
-FROM node:20-alpine as deps
-
+FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install dependencies only when needed
+# Copy package files
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+
+# Install dependencies
+RUN npm ci --legacy-peer-deps
 
 # ----------------------------------------------
 # Stage 2: Builder
 # ----------------------------------------------
-FROM node:20-alpine as builder
-
+FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy dependencies from deps stage
@@ -26,40 +27,57 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Build arguments for environment variables
-ARG VITE_API_URL
-ARG VITE_WALLETCONNECT_PROJECT_ID
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+ARG NEXT_PUBLIC_ARC_RPC_URL
+ARG NEXT_PUBLIC_ARC_EXPLORER_URL
 
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_WALLETCONNECT_PROJECT_ID=$VITE_WALLETCONNECT_PROJECT_ID
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+ENV NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=$NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+ENV NEXT_PUBLIC_ARC_RPC_URL=$NEXT_PUBLIC_ARC_RPC_URL
+ENV NEXT_PUBLIC_ARC_EXPLORER_URL=$NEXT_PUBLIC_ARC_EXPLORER_URL
+
+# Set environment variables for build
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
 # Build the application
 RUN npm run build
 
 # ----------------------------------------------
-# Stage 3: Production (using nginx)
+# Stage 3: Runner
 # ----------------------------------------------
-FROM nginx:alpine as production
+FROM node:20-alpine AS runner
+WORKDIR /app
 
-# Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Set environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
-# Copy built assets from builder
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
 
-# Add non-root user
-RUN adduser -D -g '' appuser && \
-    chown -R appuser:appuser /usr/share/nginx/html && \
-    chown -R appuser:appuser /var/cache/nginx && \
-    chown -R appuser:appuser /var/log/nginx && \
-    touch /var/run/nginx.pid && \
-    chown -R appuser:appuser /var/run/nginx.pid
+# Copy public assets
+COPY --from=builder /app/public ./public
+
+# Copy standalone build output
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Switch to non-root user
+USER nextjs
 
 # Expose port
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-# Run nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start the application
+CMD ["node", "server.js"]
