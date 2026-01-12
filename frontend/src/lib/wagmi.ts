@@ -6,13 +6,13 @@ import { createConfig, http } from 'wagmi';
 import { injected, walletConnect } from 'wagmi/connectors';
 import { defineChain } from 'viem';
 
-const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID || 1234);
+const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID || 5042002);
 const ARC_RPC_URL =
   process.env.NEXT_PUBLIC_ARC_RPC_URL ||
   process.env.NEXT_PUBLIC_ARC_RPC ||
-  'http://127.0.0.1:8545';
+  'https://rpc.testnet.arc.network';
 const ARC_EXPLORER_URL =
-  process.env.NEXT_PUBLIC_ARC_EXPLORER_URL || 'https://explorer-testnet.arc.tech';
+  process.env.NEXT_PUBLIC_ARC_EXPLORER_URL || 'https://testnet.arcscan.app';
 
 export const arcTestnet = defineChain({
   id: ARC_CHAIN_ID,

@@ -14,8 +14,10 @@ import type { ChatMessage, ProductInfo } from '@/lib/api';
 
 export interface UseChatOptions {
   sessionId?: string;
+  userId?: string;
   walletAddress?: string;
   wsUrl?: string;
+  accessToken?: string | null;
 }
 
 export interface UseChatReturn {
@@ -37,8 +39,10 @@ export interface UseChatReturn {
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const {
     sessionId: initialSessionId,
+    userId: initialUserId,
     walletAddress,
     wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/chat',
+    accessToken,
   } = options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -48,42 +52,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(() => initialSessionId || generateId());
+  const [userId] = useState(() => initialUserId || walletAddress || sessionId);
 
   const streamingMessageRef = useRef<ChatMessage | null>(null);
+  const pendingProductsRef = useRef<ProductInfo[]>([]);
+  const pendingImageRef = useRef<string | null>(null);
 
   const handleWebSocketMessage = useCallback((wsMessage: WebSocketMessage) => {
-    const payload = (wsMessage.data ?? wsMessage.content) as
-      | { content?: string; message?: string }
-      | string
-      | undefined;
-    const metadata = (wsMessage as {
-      metadata?: { products?: ProductInfo[]; imageUrl?: string; type?: string; tool?: string };
-    }).metadata;
-    const content =
-      typeof payload === 'string' ? payload : payload?.content ?? '';
-    const errorMessage =
-      typeof payload === 'string' ? payload : payload?.message ?? content;
+    const payload = wsMessage.data ?? wsMessage.content;
+    const content = typeof payload === 'string' ? payload : '';
+    const messageData = payload as { content?: string; message?: string; tool?: string; data?: unknown } | undefined;
+    const errorMessage = messageData?.message || messageData?.content || content;
 
     switch (wsMessage.type) {
-      case 'stream_start': {
-        setIsStreaming(true);
-        setStreamingContent('');
-        streamingMessageRef.current = {
-          id: generateId(),
-          role: 'assistant',
-          content: '',
-          timestamp: new Date().toISOString(),
-        };
-        break;
-      }
-
-      case 'stream_chunk':
-      case 'chunk': {
-        if (metadata?.type === 'tool_start' && metadata.tool) {
-          setActiveTool(metadata.tool);
-        }
+      case 'text': {
         if (!streamingMessageRef.current) {
-          setIsStreaming(true);
           streamingMessageRef.current = {
             id: generateId(),
             role: 'assistant',
@@ -91,49 +74,73 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             timestamp: new Date().toISOString(),
           };
         }
-
+        setIsStreaming(true);
         setStreamingContent((prev) => prev + content);
-        if (streamingMessageRef.current) {
-          streamingMessageRef.current.content += content;
+        streamingMessageRef.current.content += content;
+        break;
+      }
+      case 'tool_start': {
+        const toolName = wsMessage.tool ?? messageData?.tool ?? (payload as { tool?: string } | undefined)?.tool;
+        if (toolName) {
+          setActiveTool(toolName);
         }
         break;
       }
-
-      case 'stream_end':
-      case 'complete': {
+      case 'tool_result': {
+        setActiveTool(null);
+        break;
+      }
+      case 'products': {
+        const products = Array.isArray(wsMessage.data)
+          ? (wsMessage.data as ProductInfo[])
+          : (payload as { data?: ProductInfo[] } | undefined)?.data;
+        if (products?.length) {
+          pendingProductsRef.current = normalizeProducts(products);
+        }
+        break;
+      }
+      case 'image': {
+        const imageData =
+          (wsMessage.data as { url?: string; image_url?: string } | undefined) ??
+          (payload as { data?: { url?: string; image_url?: string } } | undefined)?.data;
+        const url = imageData?.url ?? imageData?.image_url;
+        if (url) {
+          pendingImageRef.current = url;
+        }
+        break;
+      }
+      case 'done': {
         setIsStreaming(false);
         setIsLoading(false);
         setActiveTool(null);
-
-        const endData = (wsMessage.data ?? wsMessage.content ?? metadata) as {
-          products?: ProductInfo[];
-          imageUrl?: string;
-        };
 
         if (streamingMessageRef.current) {
           const finalMessage: ChatMessage = {
             ...streamingMessageRef.current,
             metadata: {
-              products: endData?.products,
-              imageUrl: endData?.imageUrl,
+              products: pendingProductsRef.current.length
+                ? pendingProductsRef.current
+                : undefined,
+              imageUrl: pendingImageRef.current ?? undefined,
             },
           };
-
           setMessages((prev) => [...prev, finalMessage]);
-          streamingMessageRef.current = null;
         }
 
+        streamingMessageRef.current = null;
+        pendingProductsRef.current = [];
+        pendingImageRef.current = null;
         setStreamingContent('');
         break;
       }
-
       case 'message': {
-        const messageData = (wsMessage.data ?? wsMessage.content) as ChatMessage;
-        setMessages((prev) => [...prev, messageData]);
+        const messagePayload = payload as ChatMessage;
+        if (messagePayload?.content) {
+          setMessages((prev) => [...prev, messagePayload]);
+        }
         setIsLoading(false);
         break;
       }
-
       case 'error': {
         setError(errorMessage || 'An unexpected error occurred.');
         setIsLoading(false);
@@ -141,24 +148,30 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         setActiveTool(null);
         break;
       }
+      case 'pong':
+      default:
+        break;
     }
   }, []);
 
   const handleConnect = useCallback(() => {
-    // Send session initialization
-    send({
+    const initPayload = {
       type: 'init',
       sessionId,
       walletAddress,
+      token: accessToken ?? undefined,
+    };
+    send({
+      ...initPayload,
     });
-  }, [sessionId, walletAddress]);
+  }, [accessToken, sessionId, walletAddress]);
 
   const handleError = useCallback(() => {
     setError('Connection lost. Trying to reconnect...');
   }, []);
 
-  const { isConnected, send, status } = useWebSocket({
-    url: `${wsUrl}?sessionId=${sessionId}`,
+  const { isConnected, send } = useWebSocket({
+    url: `${wsUrl.replace(/\\/$/, '')}/${userId}?sessionId=${sessionId}`,
     autoConnect: true,
     reconnect: true,
     onMessage: handleWebSocketMessage,
@@ -186,9 +199,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         sessionId,
         walletAddress,
         content: content.trim(),
+        token: accessToken ?? undefined,
       });
     },
-    [send, sessionId, walletAddress]
+    [accessToken, send, sessionId, walletAddress]
   );
 
   const clearMessages = useCallback(() => {
@@ -197,6 +211,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     setIsStreaming(false);
     setStreamingContent('');
     streamingMessageRef.current = null;
+    pendingProductsRef.current = [];
+    pendingImageRef.current = null;
     setActiveTool(null);
     setError(null);
   }, []);
@@ -225,6 +241,15 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     clearError,
     isConnected,
   };
+}
+
+function normalizeProducts(products: ProductInfo[]): ProductInfo[] {
+  return products.map((product) => ({
+    ...product,
+    imageUrl:
+      product.imageUrl ||
+      (product as { image_url?: string }).image_url,
+  }));
 }
 
 export default useChat;

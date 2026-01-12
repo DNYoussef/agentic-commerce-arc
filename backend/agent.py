@@ -520,52 +520,68 @@ Format your responses clearly with sections when presenting multiple products or
             preferences=context or {}
         )
 
-        messages = [{"role": "user", "content": message}]
-
         if not self.client:
-            # Mock streaming
-            mock_response = f"Processing your request: {message[:50]}..."
-            for i in range(0, len(mock_response), 10):
-                yield {
-                    "content": mock_response[i:i+10],
-                    "metadata": {"type": "text"}
-                }
-                await asyncio.sleep(0.1)
+            async for chunk in self._stream_mock_response(message):
+                yield chunk
             return
 
-        try:
-            # Build messages with system prompt
-            full_messages = [
-                {"role": "system", "content": self.SYSTEM_PROMPT}
-            ] + messages
+        async for chunk in self._stream_openrouter(message, agent_context):
+            yield chunk
 
-            # OpenAI-compatible streaming
+    async def _stream_mock_response(
+        self,
+        message: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Yield a mock streaming response."""
+        mock_response = f"Processing your request: {message[:50]}..."
+        for i in range(0, len(mock_response), 10):
+            yield {
+                "content": mock_response[i:i + 10],
+                "metadata": {"type": "text"}
+            }
+            await asyncio.sleep(0.1)
+
+    async def _stream_openrouter(
+        self,
+        message: str,
+        context: AgentContext
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream OpenRouter response with tool execution."""
+        messages = [{"role": "user", "content": message}]
+        tool_calls: Dict[str, Dict[str, str]] = {}
+
+        try:
             stream = await self.client.chat.completions.create(
                 model=MODEL_NAME,
                 max_tokens=MAX_TOKENS,
-                messages=full_messages,
+                messages=[{"role": "system", "content": self.SYSTEM_PROMPT}] + messages,
                 tools=self._get_openai_tools_schema() or None,
                 stream=True
             )
 
             async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        yield {
-                            "content": delta.content,
-                            "metadata": {"type": "text"}
-                        }
-                    if delta.tool_calls:
-                        for tool_call in delta.tool_calls:
-                            if tool_call.function and tool_call.function.name:
-                                yield {
-                                    "content": "",
-                                    "metadata": {
-                                        "type": "tool_start",
-                                        "tool": tool_call.function.name
-                                    }
+                if not chunk.choices or not chunk.choices[0].delta:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield {
+                        "content": delta.content,
+                        "metadata": {"type": "text"}
+                    }
+                if delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        await self._accumulate_tool_call(tool_calls, tool_call)
+                        if tool_call.function and tool_call.function.name:
+                            yield {
+                                "content": "",
+                                "metadata": {
+                                    "type": "tool_start",
+                                    "tool": tool_call.function.name,
                                 }
+                            }
+
+            async for result in self._emit_tool_results(tool_calls, context):
+                yield result
 
         except APIError as e:
             logger.error(f"Streaming error: {e}")
@@ -573,6 +589,60 @@ Format your responses clearly with sections when presenting multiple products or
                 "content": "An error occurred while processing your request.",
                 "metadata": {"type": "error", "error": str(e)}
             }
+
+    async def _accumulate_tool_call(
+        self,
+        tool_calls: Dict[str, Dict[str, str]],
+        tool_call: Any
+    ) -> None:
+        """Collect tool call arguments from streaming deltas."""
+        call_id = tool_call.id or f"call_{len(tool_calls)}"
+        if call_id not in tool_calls:
+            tool_calls[call_id] = {"name": "", "args": ""}
+
+        if tool_call.function and tool_call.function.name:
+            tool_calls[call_id]["name"] = tool_call.function.name
+        if tool_call.function and tool_call.function.arguments:
+            tool_calls[call_id]["args"] += tool_call.function.arguments
+
+    async def _emit_tool_results(
+        self,
+        tool_calls: Dict[str, Dict[str, str]],
+        context: AgentContext
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute tool calls and yield results."""
+        for call in tool_calls.values():
+            tool_name = call.get("name")
+            if not tool_name:
+                continue
+            tool_args = self._safe_json_load(call.get("args", ""))
+            try:
+                result = await self._execute_tool(tool_name, tool_args, context)
+            except Exception as exc:
+                logger.error("Tool execution failed: %s", exc)
+                result = {"error": str(exc)}
+
+            metadata = {
+                "type": "tool_result",
+                "tool": tool_name,
+                "result": result,
+            }
+            if tool_name == "search_products":
+                metadata["products"] = result
+            if tool_name == "generate_image":
+                metadata["image"] = result
+            if tool_name == "compare_prices":
+                metadata["comparison"] = result
+
+            yield {"content": "", "metadata": metadata}
+
+    @staticmethod
+    def _safe_json_load(raw: str) -> Dict[str, Any]:
+        """Safely parse tool arguments from JSON."""
+        try:
+            return json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return {}
 
     async def search_products(
         self,

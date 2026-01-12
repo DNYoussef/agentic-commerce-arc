@@ -16,6 +16,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +33,7 @@ from database import (
     get_transaction_by_idempotency_key,
     update_transaction_status,
 )
-from auth import get_jwt_auth, get_current_user, TokenResponse, UserCreate, UserLogin
+from auth import get_current_user, TokenResponse, UserCreate, UserLogin
 from agent import CommerceAgent
 from blockchain import verify_escrow_transaction
 from models.schemas import (
@@ -413,130 +414,150 @@ async def generate_image(
 # WebSocket Endpoint for Streaming Chat
 # ==============================================================================
 
-@app.websocket("/ws/{connection_id}")
-async def websocket_endpoint(websocket: WebSocket, connection_id: str):
+async def _send_ws(websocket: WebSocket, message: Dict[str, Any]) -> None:
+    """Send a JSON message over WebSocket."""
+    await websocket.send_json(message)
+
+
+async def _stream_agent_response(
+    websocket: WebSocket,
+    user_id: str,
+    content: str,
+    context: Dict[str, Any],
+) -> None:
+    """Stream agent responses and tool usage over WebSocket."""
+    if not commerce_agent:
+        await _send_ws(websocket, {
+            "type": "error",
+            "message": "Agent not initialized",
+        })
+        return
+
+    full_response: list[str] = []
+
+    async for chunk in commerce_agent.stream_response(
+        message=content,
+        user_id=user_id,
+        context=context,
+    ):
+        metadata = chunk.get("metadata", {})
+        chunk_type = metadata.get("type", "text")
+
+        if chunk_type == "tool_start":
+            await _send_ws(websocket, {
+                "type": "tool_start",
+                "tool": metadata.get("tool"),
+                "args": metadata.get("args"),
+            })
+            continue
+
+        if chunk_type == "tool_result":
+            await _emit_tool_payloads(websocket, metadata)
+            continue
+
+        text = chunk.get("content", "")
+        if text:
+            full_response.append(text)
+            await _send_ws(websocket, {
+                "type": "text",
+                "content": text,
+            })
+
+    await _send_ws(websocket, {
+        "type": "done",
+        "message": "".join(full_response),
+    })
+
+
+async def _emit_tool_payloads(websocket: WebSocket, metadata: Dict[str, Any]) -> None:
+    """Send tool result payloads to the client."""
+    await _send_ws(websocket, {
+        "type": "tool_result",
+        "tool": metadata.get("tool"),
+        "result": metadata.get("result"),
+    })
+    if metadata.get("products"):
+        await _send_ws(websocket, {
+            "type": "products",
+            "data": metadata.get("products"),
+        })
+    if metadata.get("image"):
+        await _send_ws(websocket, {
+            "type": "image",
+            "data": metadata.get("image"),
+        })
+
+
+async def _heartbeat(websocket: WebSocket, interval: int = 20) -> None:
+    """Send periodic ping messages to keep the connection alive."""
+    while True:
+        await asyncio.sleep(interval)
+        await _send_ws(websocket, {"type": "ping"})
+
+
+@app.websocket("/ws/chat/{user_id}")
+async def websocket_chat(websocket: WebSocket, user_id: str):
     """
     WebSocket endpoint for streaming chat.
 
     Message format (incoming):
-    {
-        "type": "chat" | "search" | "generate",
-        "content": "message content",
-        "context": {...}  // optional
-    }
+    {"type": "message", "content": "user message here"}
 
     Message format (outgoing):
-    {
-        "type": "chunk" | "complete" | "error" | "action",
-        "content": "...",
-        "metadata": {...}
-    }
+    {"type": "text", "content": "streaming text chunk"}
+    {"type": "tool_start", "tool": "search_products", "args": {...}}
+    {"type": "tool_result", "tool": "search_products", "result": {...}}
+    {"type": "products", "data": [...]}
+    {"type": "image", "data": {"url": "...", "prompt": "..."}}
+    {"type": "error", "message": "error description"}
+    {"type": "done", "message": "full response"}
     """
-    user_id = None
+    connection_id = websocket.query_params.get("connection_id") or str(uuid4())
+    heartbeat_task: Optional[asyncio.Task] = None
 
     try:
-        # Accept connection
-        await ws_manager.connect(websocket, connection_id)
+        await ws_manager.connect(websocket, connection_id, user_id)
+        heartbeat_task = asyncio.create_task(_heartbeat(websocket))
 
-        # Wait for authentication message
-        auth_data = await asyncio.wait_for(
-            websocket.receive_json(),
-            timeout=30.0
-        )
-
-        if auth_data.get("type") != "auth":
-            await websocket.send_json({
-                "type": "error",
-                "content": "First message must be authentication"
-            })
-            return
-
-        # Verify token
-        jwt_auth = get_jwt_auth()
-        token = auth_data.get("token", "")
-        payload = jwt_auth.verify_token(token, token_type="access")
-
-        if not payload:
-            await websocket.send_json({
-                "type": "error",
-                "content": "Invalid or expired token"
-            })
-            return
-
-        user_id = payload.get("sub")
-
-        # Send auth success
-        await websocket.send_json({
-            "type": "auth_success",
-            "content": "Authentication successful"
-        })
-
-        # Main message loop
         while True:
             data = await websocket.receive_json()
-            msg_type = data.get("type", "chat")
+            msg_type = data.get("type", "message")
             content = data.get("content", "")
             context = data.get("context", {})
 
-            if msg_type == "chat":
-                # Stream chat response
-                async for chunk in commerce_agent.stream_response(
-                    message=content,
-                    user_id=user_id,
-                    context=context,
-                ):
-                    await websocket.send_json({
-                        "type": "chunk",
-                        "content": chunk["content"],
-                        "metadata": chunk.get("metadata", {}),
-                    })
+            if msg_type == "ping":
+                await _send_ws(websocket, {"type": "pong"})
+                continue
 
-                # Send completion
-                await websocket.send_json({
-                    "type": "complete",
-                    "content": "",
+            if msg_type == "pong":
+                continue
+
+            if msg_type == "init":
+                continue
+
+            if msg_type != "message":
+                await _send_ws(websocket, {
+                    "type": "error",
+                    "message": "Unsupported message type",
                 })
+                continue
 
-            elif msg_type == "search":
-                # Product search
-                results = await commerce_agent.search_products(
-                    query=content,
-                    category=context.get("category"),
-                )
-                await websocket.send_json({
-                    "type": "search_results",
-                    "content": results,
-                })
-
-            elif msg_type == "generate":
-                # Image generation
-                result = await commerce_agent.generate_product_image(
-                    prompt=content,
-                    style=context.get("style", "product"),
-                )
-                await websocket.send_json({
-                    "type": "image_result",
-                    "content": result,
-                })
-
-            elif msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+            await _stream_agent_response(websocket, user_id, content, context)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket {connection_id} disconnected")
-    except asyncio.TimeoutError:
-        logger.warning(f"WebSocket {connection_id} auth timeout")
-        await websocket.close(code=4001, reason="Authentication timeout")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         try:
-            await websocket.send_json({
+            await _send_ws(websocket, {
                 "type": "error",
-                "content": str(e),
+                "message": str(e),
             })
         except:
             pass
     finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
         ws_manager.disconnect(connection_id, user_id)
 
 

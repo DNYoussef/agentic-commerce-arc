@@ -10,6 +10,7 @@ import { parseEther, maxUint256 } from 'viem';
 import { useWriteContract } from 'wagmi';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
+import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
     connect,
     switchToArc,
   } = useWallet();
+  const { tokens } = useAuth();
   const {
     messages,
     isLoading,
@@ -53,6 +55,8 @@ export function ChatWindow({ className }: ChatWindowProps) {
     isConnected: isChatConnected,
   } = useChat({
     walletAddress: address,
+    userId: address ?? 'guest',
+    accessToken: tokens?.accessToken ?? null,
   });
   const { writeContractAsync } = useWriteContract();
 
@@ -279,7 +283,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
               </div>
               {activeTool && (
                 <div className="text-xs text-gray-400">
-                  Using tool: {activeTool.replaceAll('_', ' ')}
+                  Using tool: {formatToolLabel(activeTool)}
                 </div>
               )}
             </div>
@@ -429,6 +433,16 @@ const SUGGESTION_PROMPTS = [
   'Generate abstract digital art',
   'Create a minimalist watch',
 ];
+
+function formatToolLabel(toolName: string) {
+  const normalized = toolName.replaceAll('_', ' ');
+  if (normalized.includes('search')) return 'search products';
+  if (normalized.includes('image') || normalized.includes('generate')) {
+    return 'generate image';
+  }
+  if (normalized.includes('compare')) return 'compare prices';
+  return normalized;
+}
 
 const SIMPLE_ESCROW_ABI = [
   {
