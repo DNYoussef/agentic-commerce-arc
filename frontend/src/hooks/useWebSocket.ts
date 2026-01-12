@@ -14,19 +14,21 @@ export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected' | 'err
 export interface WebSocketMessage {
   type:
     | 'message'
-    | 'stream_start'
-    | 'stream_chunk'
-    | 'stream_end'
-    | 'chunk'
-    | 'complete'
+    | 'text'
+    | 'tool_start'
+    | 'tool_result'
+    | 'products'
+    | 'image'
+    | 'done'
     | 'error'
-    | 'auth_success'
-    | 'search_results'
-    | 'image_result'
+    | 'ping'
     | 'pong';
   data?: unknown;
   content?: unknown;
   metadata?: unknown;
+  tool?: string;
+  args?: unknown;
+  result?: unknown;
   timestamp?: string;
 }
 
@@ -35,6 +37,7 @@ export interface UseWebSocketOptions {
   autoConnect?: boolean;
   reconnect?: boolean;
   reconnectInterval?: number;
+  maxReconnectInterval?: number;
   maxReconnectAttempts?: number;
   onMessage?: (message: WebSocketMessage) => void;
   onConnect?: () => void;
@@ -60,6 +63,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     autoConnect = true,
     reconnect = true,
     reconnectInterval = 3000,
+    maxReconnectInterval = 30000,
     maxReconnectAttempts = 5,
     onMessage,
     onConnect,
@@ -121,12 +125,16 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
           // Attempt reconnection
           if (reconnect && reconnectAttempts < maxReconnectAttempts) {
+            const delay = Math.min(
+              reconnectInterval * 2 ** reconnectAttempts,
+              maxReconnectInterval
+            );
             reconnectTimeoutRef.current = setTimeout(() => {
               if (isMountedRef.current) {
                 setReconnectAttempts((prev) => prev + 1);
                 connect();
               }
-            }, reconnectInterval);
+            }, delay);
           }
         }
       };
@@ -143,6 +151,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
           try {
             const message: WebSocketMessage = JSON.parse(event.data);
             setLastMessage(message);
+            if (message.type === 'ping') {
+              ws.send(JSON.stringify({ type: 'pong' }));
+            }
             onMessage?.(message);
           } catch (error) {
             console.error('Failed to parse WebSocket message:', error);
