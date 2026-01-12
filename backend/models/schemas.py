@@ -371,3 +371,26 @@ class TransactionResponse(BaseModel):
     amount: float = Field(..., description="Transaction amount")
     created_at: datetime = Field(..., description="Creation time")
     confirmed_at: Optional[datetime] = Field(None, description="Confirmation time")
+
+
+class TransactionVerifyRequest(BaseModel):
+    """Request to verify a transaction on-chain."""
+    tx_hash: str = Field(..., description="Transaction hash")
+    escrow_address: Optional[str] = Field(None, description="Escrow contract address")
+    buyer: Optional[str] = Field(None, description="Expected buyer address")
+    seller: Optional[str] = Field(None, description="Expected seller address")
+    amount: Optional[float] = Field(None, description="Expected amount in ETH/ARC")
+    product_id: Optional[str] = Field(None, description="Product identifier")
+    idempotency_key: Optional[str] = Field(None, description="Idempotency key")
+
+
+class TransactionVerifyResponse(BaseModel):
+    """Verification result."""
+    tx_hash: str = Field(..., description="Transaction hash")
+    status: TransactionStatus = Field(..., description="Transaction status")
+    verified: bool = Field(..., description="Whether verification succeeded")
+    escrow_id: Optional[str] = Field(None, description="Escrow ID")
+    buyer: Optional[str] = Field(None, description="Buyer address")
+    seller: Optional[str] = Field(None, description="Seller address")
+    amount: Optional[float] = Field(None, description="Escrow amount")
+    reason: Optional[str] = Field(None, description="Failure reason if any")

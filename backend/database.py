@@ -184,11 +184,25 @@ async def _create_tables(conn: aiosqlite.Connection):
             status TEXT DEFAULT 'pending',
             amount REAL,
             token_address TEXT,
+            idempotency_key TEXT,
             metadata TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             confirmed_at TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
+    """)
+
+    # Ensure idempotency_key column exists for older databases
+    try:
+        await conn.execute("ALTER TABLE transactions ADD COLUMN idempotency_key TEXT")
+    except aiosqlite.OperationalError:
+        pass
+
+    # Create unique index for idempotency keys
+    await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_idempotency_key
+        ON transactions(idempotency_key)
+        WHERE idempotency_key IS NOT NULL
     """)
 
     logger.info("Database tables created")
@@ -370,3 +384,68 @@ async def save_generated_image(
             (user_id, prompt, image_url, style, aspect_ratio, model)
         )
         return session.lastrowid
+
+
+async def get_transaction_by_hash(tx_hash: str) -> Optional[dict]:
+    """Fetch a transaction by its hash."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE tx_hash = ?",
+            (tx_hash,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_transaction_by_idempotency_key(idempotency_key: str) -> Optional[dict]:
+    """Fetch a transaction by idempotency key."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE idempotency_key = ?",
+            (idempotency_key,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def create_transaction(
+    user_id: int,
+    tx_hash: str,
+    tx_type: str,
+    status: str,
+    amount: Optional[float] = None,
+    token_address: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+    metadata: Optional[str] = None,
+) -> int:
+    """Create a new transaction record."""
+    async with DatabaseSession() as session:
+        await session.execute(
+            """
+            INSERT INTO transactions
+            (user_id, tx_hash, tx_type, status, amount, token_address, idempotency_key, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, tx_hash, tx_type, status, amount, token_address, idempotency_key, metadata)
+        )
+        return session.lastrowid
+
+
+async def update_transaction_status(
+    tx_hash: str,
+    status: str,
+    confirmed_at: Optional[str] = None,
+    metadata: Optional[str] = None,
+):
+    """Update transaction status and metadata."""
+    async with DatabaseSession() as session:
+        await session.execute(
+            """
+            UPDATE transactions
+            SET status = ?, confirmed_at = COALESCE(?, confirmed_at), metadata = COALESCE(?, metadata)
+            WHERE tx_hash = ?
+            """,
+            (status, confirmed_at, metadata, tx_hash)
+        )

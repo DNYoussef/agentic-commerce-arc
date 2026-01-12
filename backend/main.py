@@ -21,10 +21,20 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from web3 import Web3
 
-from database import init_db, close_db, get_db
+from database import (
+    init_db,
+    close_db,
+    get_db,
+    create_transaction,
+    get_transaction_by_hash,
+    get_transaction_by_idempotency_key,
+    update_transaction_status,
+)
 from auth import get_jwt_auth, get_current_user, TokenResponse, UserCreate, UserLogin
 from agent import CommerceAgent
+from blockchain import verify_escrow_transaction
 from models.schemas import (
     ProductSearch,
     ProductResponse,
@@ -35,6 +45,10 @@ from models.schemas import (
     PriceComparisonRequest,
     PriceComparisonResponse,
     HealthResponse,
+    TransactionVerifyRequest,
+    TransactionVerifyResponse,
+    TransactionStatus,
+    TransactionType,
 )
 
 # Configure logging
@@ -280,6 +294,94 @@ async def compare_prices(
 
     comparison = await commerce_agent.compare_prices(request.product_id)
     return PriceComparisonResponse(**comparison)
+
+
+# ==============================================================================
+# Transaction Endpoints
+# ==============================================================================
+
+@app.post("/transactions/verify", response_model=TransactionVerifyResponse, tags=["Transactions"])
+async def verify_transaction(
+    payload: TransactionVerifyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Verify a transaction on-chain and store it with idempotency safeguards."""
+    user_id = int(current_user.get("sub"))
+
+    if payload.idempotency_key:
+        existing = await get_transaction_by_idempotency_key(payload.idempotency_key)
+        if existing:
+            if existing.get("tx_hash") != payload.tx_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency key already used with different transaction."
+                )
+            return TransactionVerifyResponse(
+                tx_hash=existing["tx_hash"],
+                status=TransactionStatus(existing["status"]),
+                verified=existing["status"] == TransactionStatus.CONFIRMED.value,
+                amount=existing.get("amount"),
+            )
+
+    existing_tx = await get_transaction_by_hash(payload.tx_hash)
+    if existing_tx:
+        return TransactionVerifyResponse(
+            tx_hash=existing_tx["tx_hash"],
+            status=TransactionStatus(existing_tx["status"]),
+            verified=existing_tx["status"] == TransactionStatus.CONFIRMED.value,
+            amount=existing_tx.get("amount"),
+        )
+
+    escrow_address = payload.escrow_address or os.getenv("ESCROW_CONTRACT")
+    if not escrow_address:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Escrow contract address is required."
+        )
+
+    expected_amount = None
+    if payload.amount is not None:
+        expected_amount = Web3.to_wei(payload.amount, "ether")
+
+    verification = verify_escrow_transaction(
+        tx_hash=payload.tx_hash,
+        escrow_address=escrow_address,
+        expected_buyer=payload.buyer,
+        expected_seller=payload.seller,
+        expected_amount=expected_amount,
+    )
+
+    status_value = verification.get("status", "pending")
+    metadata = json.dumps(
+        {
+            "verification": verification,
+            "product_id": payload.product_id,
+        }
+    )
+
+    await create_transaction(
+        user_id=user_id,
+        tx_hash=payload.tx_hash,
+        tx_type=TransactionType.PURCHASE.value,
+        status=status_value,
+        amount=payload.amount,
+        idempotency_key=payload.idempotency_key,
+        metadata=metadata,
+    )
+
+    if status_value in {"confirmed", "failed"}:
+        await update_transaction_status(payload.tx_hash, status_value, metadata=metadata)
+
+    return TransactionVerifyResponse(
+        tx_hash=payload.tx_hash,
+        status=TransactionStatus(status_value),
+        verified=verification.get("verified", False),
+        escrow_id=verification.get("escrow_id"),
+        buyer=verification.get("buyer"),
+        seller=verification.get("seller"),
+        amount=payload.amount,
+        reason=verification.get("reason"),
+    )
 
 
 # ==============================================================================

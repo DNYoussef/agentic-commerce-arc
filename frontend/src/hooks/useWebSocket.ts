@@ -12,9 +12,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 export interface WebSocketMessage {
-  type: 'message' | 'stream_start' | 'stream_chunk' | 'stream_end' | 'error';
-  data: unknown;
-  timestamp: string;
+  type:
+    | 'message'
+    | 'stream_start'
+    | 'stream_chunk'
+    | 'stream_end'
+    | 'chunk'
+    | 'complete'
+    | 'error'
+    | 'auth_success'
+    | 'search_results'
+    | 'image_result'
+    | 'pong';
+  data?: unknown;
+  content?: unknown;
+  metadata?: unknown;
+  timestamp?: string;
 }
 
 export interface UseWebSocketOptions {
