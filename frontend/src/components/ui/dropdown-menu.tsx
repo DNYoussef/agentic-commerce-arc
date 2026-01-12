@@ -37,7 +37,7 @@ interface DropdownMenuContentProps extends HTMLAttributes<HTMLDivElement> {
   alignOffset?: number;
 }
 
-interface DropdownMenuItemProps extends HTMLAttributes<HTMLDivElement> {
+interface DropdownMenuItemProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onSelect'> {
   children: ReactNode;
   disabled?: boolean;
   variant?: ItemVariant;

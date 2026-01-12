@@ -77,6 +77,7 @@ export function initAppKit() {
   });
 
   appKitInstance = createAppKit({
+    projectId: WALLETCONNECT_PROJECT_ID,
     adapters: [adapter],
     networks: [appKitNetwork],
     metadata: {

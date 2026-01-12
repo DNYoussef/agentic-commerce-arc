@@ -171,7 +171,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   }, []);
 
   const { isConnected, send } = useWebSocket({
-    url: `${wsUrl.replace(/\\/$/, '')}/${userId}?sessionId=${sessionId}`,
+    url: `${wsUrl.replace(/\/$/, '')}/${userId}?sessionId=${sessionId}`,
     autoConnect: true,
     reconnect: true,
     onMessage: handleWebSocketMessage,
