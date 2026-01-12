@@ -23,6 +23,7 @@ export interface UseChatReturn {
   isLoading: boolean;
   isStreaming: boolean;
   streamingContent: string;
+  activeTool: string | null;
   error: string | null;
   sessionId: string;
   sendMessage: (content: string) => void;
@@ -44,12 +45,25 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(() => initialSessionId || generateId());
 
   const streamingMessageRef = useRef<ChatMessage | null>(null);
 
   const handleWebSocketMessage = useCallback((wsMessage: WebSocketMessage) => {
+    const payload = (wsMessage.data ?? wsMessage.content) as
+      | { content?: string; message?: string }
+      | string
+      | undefined;
+    const metadata = (wsMessage as {
+      metadata?: { products?: ProductInfo[]; imageUrl?: string; type?: string; tool?: string };
+    }).metadata;
+    const content =
+      typeof payload === 'string' ? payload : payload?.content ?? '';
+    const errorMessage =
+      typeof payload === 'string' ? payload : payload?.message ?? content;
+
     switch (wsMessage.type) {
       case 'stream_start': {
         setIsStreaming(true);
@@ -63,20 +77,35 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         break;
       }
 
-      case 'stream_chunk': {
-        const chunk = wsMessage.data as { content: string };
-        setStreamingContent((prev) => prev + chunk.content);
+      case 'stream_chunk':
+      case 'chunk': {
+        if (metadata?.type === 'tool_start' && metadata.tool) {
+          setActiveTool(metadata.tool);
+        }
+        if (!streamingMessageRef.current) {
+          setIsStreaming(true);
+          streamingMessageRef.current = {
+            id: generateId(),
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString(),
+          };
+        }
+
+        setStreamingContent((prev) => prev + content);
         if (streamingMessageRef.current) {
-          streamingMessageRef.current.content += chunk.content;
+          streamingMessageRef.current.content += content;
         }
         break;
       }
 
-      case 'stream_end': {
+      case 'stream_end':
+      case 'complete': {
         setIsStreaming(false);
         setIsLoading(false);
+        setActiveTool(null);
 
-        const endData = wsMessage.data as {
+        const endData = (wsMessage.data ?? wsMessage.content ?? metadata) as {
           products?: ProductInfo[];
           imageUrl?: string;
         };
@@ -85,8 +114,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           const finalMessage: ChatMessage = {
             ...streamingMessageRef.current,
             metadata: {
-              products: endData.products,
-              imageUrl: endData.imageUrl,
+              products: endData?.products,
+              imageUrl: endData?.imageUrl,
             },
           };
 
@@ -99,17 +128,17 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       }
 
       case 'message': {
-        const messageData = wsMessage.data as ChatMessage;
+        const messageData = (wsMessage.data ?? wsMessage.content) as ChatMessage;
         setMessages((prev) => [...prev, messageData]);
         setIsLoading(false);
         break;
       }
 
       case 'error': {
-        const errorData = wsMessage.data as { message: string };
-        setError(errorData.message);
+        setError(errorMessage || 'An unexpected error occurred.');
         setIsLoading(false);
         setIsStreaming(false);
+        setActiveTool(null);
         break;
       }
     }
@@ -164,7 +193,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   const clearMessages = useCallback(() => {
     setMessages([]);
+    setIsLoading(false);
+    setIsStreaming(false);
     setStreamingContent('');
+    streamingMessageRef.current = null;
+    setActiveTool(null);
     setError(null);
   }, []);
 
@@ -184,6 +217,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     isLoading,
     isStreaming,
     streamingContent,
+    activeTool,
     error,
     sessionId,
     sendMessage,

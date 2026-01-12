@@ -1,26 +1,13 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-  output: 'standalone',
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**.replicate.delivery',
-      },
-      {
-        protocol: 'https',
-        hostname: 'replicate.delivery',
-      },
-    ],
-  },
-  experimental: {
-    serverActions: {
-      bodySizeLimit: '2mb',
-    },
-  },
   webpack: (config) => {
-    config.externals.push('pino-pretty', 'lokijs', 'encoding');
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      porto: path.resolve(__dirname, 'src/porto'),
+      'porto/internal': path.resolve(__dirname, 'src/porto/internal'),
+    };
     return config;
   },
 };

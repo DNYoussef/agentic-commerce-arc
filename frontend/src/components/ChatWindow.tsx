@@ -6,6 +6,8 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback, FormEvent } from 'react';
+import { parseEther, maxUint256 } from 'viem';
+import { useWriteContract } from 'wagmi';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
 import { useWallet } from '@/hooks/useWallet';
@@ -24,22 +26,48 @@ interface ChatWindowProps {
 
 export function ChatWindow({ className }: ChatWindowProps) {
   const [inputValue, setInputValue] = useState('');
+  const [purchasingProductId, setPurchasingProductId] = useState<string | null>(
+    null
+  );
+  const [hasApproved, setHasApproved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { address } = useWallet();
+  const {
+    address,
+    isConnected: isWalletConnected,
+    isCorrectChain,
+    connect,
+    switchToArc,
+  } = useWallet();
   const {
     messages,
     isLoading,
     isStreaming,
     streamingContent,
+    activeTool,
     error,
     sendMessage,
+    clearMessages,
     clearError,
-    isConnected,
+    isConnected: isChatConnected,
   } = useChat({
     walletAddress: address,
   });
+  const { writeContractAsync } = useWriteContract();
+
+  const escrowContractAddress = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as
+    | `0x${string}`
+    | undefined;
+  const defaultSellerAddress = process.env.NEXT_PUBLIC_ESCROW_SELLER as
+    | `0x${string}`
+    | undefined;
+  const tokenAddress = process.env.NEXT_PUBLIC_TOKEN_ADDRESS as
+    | `0x${string}`
+    | undefined;
+  const tokenSpenderAddress = process.env.NEXT_PUBLIC_TOKEN_SPENDER as
+    | `0x${string}`
+    | undefined;
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -49,6 +77,11 @@ export function ChatWindow({ className }: ChatWindowProps) {
   // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setHasApproved(window.localStorage.getItem('arc-token-approved') === 'true');
   }, []);
 
   const handleSubmit = useCallback(
@@ -62,10 +95,97 @@ export function ChatWindow({ className }: ChatWindowProps) {
     [inputValue, isLoading, sendMessage]
   );
 
-  const handlePurchase = useCallback((product: ProductInfo) => {
-    // TODO: Implement purchase flow with smart contract interaction
-    console.log('Purchasing product:', product);
-  }, []);
+  const handlePurchase = useCallback(
+    async (product: ProductInfo) => {
+      if (!isWalletConnected) {
+        connect();
+        return;
+      }
+
+      if (!isCorrectChain) {
+        await switchToArc();
+        return;
+      }
+
+      if (tokenAddress && tokenSpenderAddress && !hasApproved) {
+        try {
+          await writeContractAsync({
+            abi: ERC20_ABI,
+            address: tokenAddress,
+            functionName: 'approve',
+            args: [tokenSpenderAddress, maxUint256],
+          });
+          setHasApproved(true);
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem('arc-token-approved', 'true');
+          }
+        } catch (error) {
+          console.error('Approval failed:', error);
+          return;
+        }
+      }
+
+      if (!escrowContractAddress) {
+        console.warn('Missing escrow contract address.');
+        return;
+      }
+
+      const sellerAddress =
+        (product as { sellerAddress?: `0x${string}` }).sellerAddress ??
+        defaultSellerAddress;
+
+      if (!sellerAddress) {
+        console.warn('Missing seller address for purchase.');
+        return;
+      }
+
+      if (purchasingProductId) {
+        return;
+      }
+
+      const priceValue = Number(product.price);
+      if (!Number.isFinite(priceValue)) {
+        console.warn('Invalid product price:', product.price);
+        return;
+      }
+
+      try {
+        setPurchasingProductId(product.id);
+        const amount = parseEther(priceValue.toString());
+
+        await writeContractAsync({
+          abi: SIMPLE_ESCROW_ABI,
+          address: escrowContractAddress,
+          functionName: 'createEscrow',
+          args: [sellerAddress, amount],
+          value: amount,
+        });
+      } catch (error) {
+        console.error('Purchase failed:', error);
+      } finally {
+        setPurchasingProductId(null);
+      }
+    },
+    [
+      connect,
+      defaultSellerAddress,
+      escrowContractAddress,
+      hasApproved,
+      isWalletConnected,
+      isCorrectChain,
+      purchasingProductId,
+      switchToArc,
+      tokenAddress,
+      tokenSpenderAddress,
+      writeContractAsync,
+    ]
+  );
+
+  const handleClearChat = useCallback(() => {
+    clearMessages();
+    setInputValue('');
+    inputRef.current?.focus();
+  }, [clearMessages]);
 
   return (
     <div
@@ -81,20 +201,19 @@ export function ChatWindow({ className }: ChatWindowProps) {
           <div
             className={cn(
               'w-2 h-2 rounded-full',
-              isConnected ? 'bg-green-400' : 'bg-yellow-400'
+              isChatConnected ? 'bg-green-400' : 'bg-yellow-400'
             )}
           />
           <span className="text-sm text-gray-400">
-            {isConnected ? 'Connected' : 'Connecting...'}
+            {isChatConnected ? 'Connected' : 'Connecting...'}
           </span>
         </div>
 
         <h2 className="font-semibold text-white">AI Shopping Assistant</h2>
 
         <button
-          onClick={() => {
-            // TODO: Clear chat
-          }}
+          onClick={handleClearChat}
+          disabled={messages.length === 0 && !isStreaming && !isLoading}
           className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
         >
           Clear
@@ -143,20 +262,26 @@ export function ChatWindow({ className }: ChatWindowProps) {
             key={message.id}
             message={message}
             onPurchase={handlePurchase}
+            purchasingProductId={purchasingProductId}
           />
         ))}
 
         {/* Streaming Message */}
-        {isStreaming && streamingContent && (
+        {isStreaming && (streamingContent || activeTool) && (
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-full bg-arc-primary/20 flex items-center justify-center flex-shrink-0">
               <SparklesIcon className="w-4 h-4 text-arc-primary" />
             </div>
             <div className="flex-1 space-y-2">
               <div className="bg-gray-800 rounded-xl px-4 py-3 text-white">
-                {streamingContent}
+                {streamingContent || 'Thinking...'}
                 <span className="inline-block w-2 h-4 ml-1 bg-arc-primary animate-pulse" />
               </div>
+              {activeTool && (
+                <div className="text-xs text-gray-400">
+                  Using tool: {activeTool.replaceAll('_', ' ')}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -228,9 +353,14 @@ export function ChatWindow({ className }: ChatWindowProps) {
 interface MessageBubbleProps {
   message: ChatMessage;
   onPurchase: (product: ProductInfo) => void;
+  purchasingProductId: string | null;
 }
 
-function MessageBubble({ message, onPurchase }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  onPurchase,
+  purchasingProductId,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -281,6 +411,7 @@ function MessageBubble({ message, onPurchase }: MessageBubbleProps) {
                 key={product.id}
                 product={product}
                 onPurchase={onPurchase}
+                isPurchasing={purchasingProductId === product.id}
               />
             ))}
           </div>
@@ -297,6 +428,32 @@ const SUGGESTION_PROMPTS = [
   'Design a cyberpunk jacket',
   'Generate abstract digital art',
   'Create a minimalist watch',
+];
+
+const SIMPLE_ESCROW_ABI = [
+  {
+    type: 'function',
+    name: 'createEscrow',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'seller', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: 'escrowId', type: 'uint256' }],
+  },
+];
+
+const ERC20_ABI = [
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: 'success', type: 'bool' }],
+  },
 ];
 
 // ============ ICONS ============
