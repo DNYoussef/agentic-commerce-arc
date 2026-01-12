@@ -24,8 +24,8 @@ email-validator>=2.1.0,<3.0.0
 # HTTP Client
 httpx>=0.26.0,<0.28.0
 
-# AI / LLM
-anthropic>=0.39.0,<0.45.0
+# AI / LLM (via OpenRouter - OpenAI-compatible API)
+openai>=1.0.0,<2.0.0
 
 # Web3 / Blockchain
 web3>=6.14.0,<7.0.0
