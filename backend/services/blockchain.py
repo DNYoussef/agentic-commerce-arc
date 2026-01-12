@@ -13,7 +13,14 @@ from typing import Any, Dict
 
 from eth_account import Account
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
+# web3.py v7+ compatibility
+try:
+    from web3.middleware import ExtraDataToPOAMiddleware
+    poa_middleware = ExtraDataToPOAMiddleware
+except ImportError:
+    from web3.middleware import geth_poa_middleware
+    poa_middleware = geth_poa_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +73,7 @@ def _load_escrow_abi() -> list[dict[str, Any]]:
 
 def _get_web3() -> Web3:
     w3 = Web3(Web3.HTTPProvider(ARC_RPC))
-    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    w3.middleware_onion.inject(poa_middleware, layer=0)
     return w3
 
 
