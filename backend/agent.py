@@ -21,7 +21,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from openai import AsyncOpenAI, APIError

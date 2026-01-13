@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from web3 import Web3
 
@@ -553,7 +553,7 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
                 "type": "error",
                 "message": str(e),
             })
-        except:
+        except Exception:
             pass
     finally:
         if heartbeat_task:
