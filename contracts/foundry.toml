@@ -11,6 +11,7 @@ ffi = false
 ast = true
 build_info = true
 extra_output = ["abi", "evm.bytecode"]
+gas_reports = []
 
 # Formatter settings
 [fmt]
@@ -44,11 +45,6 @@ localhost = "http://127.0.0.1:8545"
 # Etherscan verification (for future mainnet)
 [etherscan]
 arc = { key = "${ETHERSCAN_API_KEY}", url = "https://api.arcscan.io/api" }
-
-# Gas reporting
-[profile.default.gas_reports]
-enabled = true
-ignore = []
 
 # CI profile with more fuzz runs
 [profile.ci]
