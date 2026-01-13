@@ -69,6 +69,8 @@ yarn-error.log*
 frontend/dist/
 frontend/build/
 frontend/.vite/
+frontend/.next/
+frontend/next-env.d.ts
 *.local
 
 # ----------------------------------------------
@@ -147,3 +149,5 @@ playwright-report/
 .cache/
 tmp/
 temp/
+tmpclaude-*
+nul

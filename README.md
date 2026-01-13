@@ -1,5 +1,16 @@
 # Agentic Commerce on Arc
 
+## Canonical Status
+
+<!-- STATUS:START -->
+Canonical status from `2026-EXOSKELETON-STATUS.json`.
+
+Status: 95% (source: implementation-plan)
+Registry refreshed: 2026-01-13T17:58:23.788789+00:00
+Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=089ee3e
+<!-- STATUS:END -->
+
+
 > AI-powered autonomous commerce platform built on the Arc blockchain
 
 [![Deploy to Railway](https://railway.app/button.svg)](https://railway.app/template)
