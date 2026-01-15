@@ -2,6 +2,7 @@
 # Agentic Commerce Backend - Dockerfile
 # ==============================================
 # Multi-stage build for optimized production image
+# Redeployed: 2026-01-15 13:45 EST
 
 # ----------------------------------------------
 # Stage 1: Builder
