@@ -2,6 +2,7 @@ const path = require('path');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   webpack: (config, { isServer }) => {
     // Alias React Native modules to stubs (works for both server/client)
     config.resolve.alias = {
