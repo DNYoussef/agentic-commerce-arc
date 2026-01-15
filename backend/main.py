@@ -35,6 +35,12 @@ from database import (
 from auth import get_current_user, TokenResponse, UserCreate, UserLogin
 from agent import CommerceAgent
 from blockchain import verify_escrow_transaction
+from universal_components import (
+    init_connascence_bridge,
+    init_memory_client,
+    init_telemetry_bridge,
+    init_tagger,
+)
 from models.schemas import (
     ProductSearch,
     ProductResponse,
@@ -57,6 +63,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+tagger = init_tagger()
+memory_client = init_memory_client()
+telemetry_bridge = init_telemetry_bridge()
+connascence_bridge = init_connascence_bridge()
 
 # WebSocket connection manager (adapted from library)
 class ConnectionManager:

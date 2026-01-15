@@ -34,8 +34,17 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
+def _get_password_schemes() -> list[str]:
+    env_value = os.getenv("PASSWORD_HASH_SCHEMES")
+    if env_value:
+        return [scheme.strip() for scheme in env_value.split(",") if scheme.strip()]
+    if os.getenv("TESTING") == "true":
+        return ["pbkdf2_sha256"]
+    return ["bcrypt"]
+
+
 # Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=_get_password_schemes(), deprecated="auto")
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -101,7 +110,7 @@ class JWTAuth:
 
     def __init__(self, config: JWTConfig):
         self._config = config
-        self._pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        self._pwd_context = CryptContext(schemes=_get_password_schemes(), deprecated="auto")
 
         # Validate secret key length
         if len(self._config.secret_key) < self.MIN_SECRET_KEY_LENGTH:

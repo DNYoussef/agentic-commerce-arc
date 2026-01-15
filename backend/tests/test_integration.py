@@ -3,6 +3,8 @@ Integration tests for chat and product endpoints.
 """
 
 from uuid import uuid4
+import os
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +16,80 @@ from main import app
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def stub_commerce_agent(monkeypatch):
+    import main
+
+    class DummyAgent:
+        async def process_message(self, message: str, user_id: str, context: dict):
+            return {
+                "message": "ok",
+                "actions": [],
+                "products": [],
+                "images": [],
+            }
+
+        async def search_products(self, query: str, category=None, max_price=None, min_price=None):
+            return [
+                {
+                    "id": "prod_test",
+                    "name": "Test Product",
+                    "description": "Test description",
+                    "price": 9.99,
+                    "currency": "USD",
+                    "category": "test",
+                    "image_url": None,
+                    "source": "test",
+                    "rating": 4.5,
+                    "reviews_count": 10,
+                    "in_stock": True,
+                    "url": None,
+                }
+            ]
+
+        async def compare_prices(self, product_id: str):
+            return {
+                "product_name": "Test Product",
+                "product_id": product_id,
+                "sources": [
+                    {
+                        "source": "test",
+                        "price": 9.99,
+                        "currency": "USD",
+                        "url": None,
+                        "in_stock": True,
+                        "shipping": None,
+                        "total": 9.99,
+                    }
+                ],
+                "best_deal": {
+                    "source": "test",
+                    "price": 9.99,
+                    "shipping": None,
+                    "total": 9.99,
+                    "currency": "USD",
+                    "url": None,
+                    "in_stock": True,
+                    "savings": 0,
+                    "savings_percent": 0,
+                },
+                "fetched_at": datetime.utcnow().isoformat(),
+                "cached": False,
+            }
+
+        async def generate_product_image(self, prompt: str, style: str, aspect_ratio: str):
+            return {
+                "image_url": "https://example.com/test.png",
+                "prompt": prompt,
+                "style": style,
+                "model": "test",
+                "prediction_id": None,
+                "error": None,
+            }
+
+    monkeypatch.setattr(main, "commerce_agent", DummyAgent())
 
 
 @pytest.fixture
@@ -95,6 +171,7 @@ def test_websocket_connection():
         assert message["type"] in {"pong", "ping"}
 
 
+@pytest.mark.skipif(os.getenv("TESTING") == "true", reason="requires live agent streaming")
 def test_websocket_streaming():
     client = TestClient(app)
     with client.websocket_connect("/ws/chat/test-user") as websocket:

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from database import get_db, DatabaseSession
+from database import get_db_context, DatabaseSession
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +339,7 @@ class PriceComparer:
         """Get price history for a product."""
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
-        async with get_db() as db:
+        async with get_db_context() as db:
             cursor = await db.execute(
                 """
                 SELECT source, price, currency, fetched_at

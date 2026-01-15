@@ -219,22 +219,28 @@ async def close_db():
             logger.info("Database connection closed")
 
 
-@asynccontextmanager
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
     """
-    Get a database connection context manager.
-
-    Usage:
-        async with get_db() as db:
-            await db.execute("SELECT * FROM users")
+    FastAPI dependency that yields a database connection.
     """
     global _db_connection
 
     if _db_connection is None:
         await init_db()
 
-    # Return the shared connection
-    # For higher concurrency, implement a proper connection pool
+    yield _db_connection
+
+
+@asynccontextmanager
+async def get_db_context() -> AsyncGenerator[aiosqlite.Connection, None]:
+    """
+    Async context manager for database access inside helper functions.
+    """
+    global _db_connection
+
+    if _db_connection is None:
+        await init_db()
+
     yield _db_connection
 
 
@@ -302,7 +308,7 @@ class DatabaseSession:
 
 async def get_user_by_email(email: str) -> Optional[dict]:
     """Get a user by email address."""
-    async with get_db() as db:
+    async with get_db_context() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM users WHERE email = ?",
@@ -316,7 +322,7 @@ async def get_user_by_email(email: str) -> Optional[dict]:
 
 async def get_user_by_id(user_id: int) -> Optional[dict]:
     """Get a user by ID."""
-    async with get_db() as db:
+    async with get_db_context() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM users WHERE id = ?",
@@ -350,7 +356,7 @@ async def save_chat_message(session_id: int, role: str, content: str, metadata: 
 
 async def get_chat_history(session_id: int, limit: int = 50) -> list:
     """Get chat history for a session."""
-    async with get_db() as db:
+    async with get_db_context() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
@@ -388,7 +394,7 @@ async def save_generated_image(
 
 async def get_transaction_by_hash(tx_hash: str) -> Optional[dict]:
     """Fetch a transaction by its hash."""
-    async with get_db() as db:
+    async with get_db_context() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM transactions WHERE tx_hash = ?",
@@ -400,7 +406,7 @@ async def get_transaction_by_hash(tx_hash: str) -> Optional[dict]:
 
 async def get_transaction_by_idempotency_key(idempotency_key: str) -> Optional[dict]:
     """Fetch a transaction by idempotency key."""
-    async with get_db() as db:
+    async with get_db_context() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM transactions WHERE idempotency_key = ?",
