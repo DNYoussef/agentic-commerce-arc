@@ -236,7 +236,8 @@ export function toBeSorted(
 
   const defaultCompare = (a: unknown, b: unknown): number => {
     if (a === b) return 0;
-    return a < b ? -1 : 1;
+    // Type assertion for comparison - caller should pass compatible types
+    return (a as number | string) < (b as number | string) ? -1 : 1;
   };
 
   const compare = compareFn ?? defaultCompare;
