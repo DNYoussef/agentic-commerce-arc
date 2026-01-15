@@ -10,8 +10,15 @@ const customJestConfig = {
   testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^@testing/(.*)$': '<rootDir>/src/lib/testing/$1',
   },
-  collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts'],
+  collectCoverageFrom: [
+    'src/lib/**/*.{ts,tsx}',
+    '!src/lib/wagmi.ts',
+    '!src/lib/testing/**',
+    'src/porto/**/*.{ts,tsx}',
+    '!src/**/*.d.ts',
+  ],
   coverageThreshold: {
     global: {
       branches: 10,
