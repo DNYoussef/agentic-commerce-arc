@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -40,19 +40,36 @@ export function ProductCard({
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isShimmering, setIsShimmering] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const handlePurchase = () => {
+    setIsShimmering(true);
+    setTimeout(() => setIsShimmering(false), 1500);
     onPurchase?.(product);
   };
+
+  // Spotlight effect - track mouse position
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    cardRef.current.style.setProperty('--spotlight-x', `${x}%`);
+    cardRef.current.style.setProperty('--spotlight-y', `${y}%`);
+  }, []);
 
   return (
     <>
       <div
+        ref={cardRef}
+        onMouseMove={handleMouseMove}
         className={cn(
-          'group relative overflow-hidden rounded-xl',
+          'group relative overflow-hidden rounded-xl spotlight-card',
           'bg-gray-800/50 border border-gray-700',
           'hover:border-arc-primary/50 hover:shadow-lg hover:shadow-arc-primary/10',
           'transition-all duration-300',
+          isShimmering && 'shimmer-effect',
           className
         )}
       >
@@ -105,7 +122,7 @@ export function ProductCard({
           <p className="text-sm text-gray-400 line-clamp-2">{product.description}</p>
 
           <div className="flex items-center justify-between pt-2">
-            <span className="text-lg font-bold text-arc-primary">
+            <span className="text-lg font-bold text-arc-primary font-data">
               {product.price} ARC
             </span>
 
@@ -164,13 +181,13 @@ export function ProductCard({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h4 className="text-sm font-medium text-gray-400">Price</h4>
-                <p className="text-lg font-bold text-arc-primary">{product.price} ARC</p>
+                <p className="text-lg font-bold text-arc-primary font-data">{product.price} ARC</p>
               </div>
 
               {product.contractAddress && (
                 <div>
                   <h4 className="text-sm font-medium text-gray-400">Contract</h4>
-                  <p className="text-white font-mono text-sm truncate">
+                  <p className="text-white font-data text-sm truncate">
                     {product.contractAddress}
                   </p>
                 </div>
@@ -179,7 +196,7 @@ export function ProductCard({
               {product.tokenId && (
                 <div>
                   <h4 className="text-sm font-medium text-gray-400">Token ID</h4>
-                  <p className="text-white font-mono">{product.tokenId}</p>
+                  <p className="text-white font-data">{product.tokenId}</p>
                 </div>
               )}
             </div>

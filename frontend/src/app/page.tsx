@@ -178,7 +178,7 @@ interface StatCardProps {
 function StatCard({ label, value }: StatCardProps) {
   return (
     <div className="text-center">
-      <p className="text-lg font-bold text-white">{value}</p>
+      <p className="text-lg font-bold text-white font-data">{value}</p>
       <p className="text-xs text-gray-500">{label}</p>
     </div>
   );

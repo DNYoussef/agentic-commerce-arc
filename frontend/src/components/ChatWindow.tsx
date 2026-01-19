@@ -373,17 +373,17 @@ function MessageBubble({
 
   return (
     <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      {/* Avatar */}
+      {/* Avatar - AI gets primary color to emphasize its responses */}
       <div
         className={cn(
           'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
-          isUser ? 'bg-gray-700' : 'bg-arc-primary/20'
+          isUser ? 'bg-gray-800 border border-gray-700' : 'bg-arc-primary'
         )}
       >
         {isUser ? (
-          <UserIcon className="w-4 h-4 text-gray-300" />
+          <UserIcon className="w-4 h-4 text-gray-400" />
         ) : (
-          <SparklesIcon className="w-4 h-4 text-arc-primary" />
+          <SparklesIcon className="w-4 h-4 text-white" />
         )}
       </div>
 
@@ -393,8 +393,8 @@ function MessageBubble({
           className={cn(
             'rounded-xl px-4 py-3 max-w-[80%] inline-block',
             isUser
-              ? 'bg-arc-primary text-white'
-              : 'bg-gray-800 text-white'
+              ? 'bg-gray-800 text-white border border-gray-700'
+              : 'bg-arc-primary/10 text-white border border-arc-primary/20'
           )}
         >
           <p className="whitespace-pre-wrap">{message.content}</p>
