@@ -446,6 +446,7 @@ async def get_current_user_optional(
 
     token = authorization.split(" ", 1)[1]
 
+    jwt_auth = get_jwt_auth()
     try:
         payload = jwt_auth.verify_token(token)
         if payload is None or "sub" not in payload:
