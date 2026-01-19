@@ -83,10 +83,12 @@ export function ChatWindow({ className }: ChatWindowProps) {
     inputRef.current?.focus();
   }, []);
 
+  // Check approval state per-wallet address (approvals are wallet-specific)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setHasApproved(window.localStorage.getItem('arc-token-approved') === 'true');
-  }, []);
+    if (typeof window === 'undefined' || !address) return;
+    const key = `arc-token-approved-${address.toLowerCase()}`;
+    setHasApproved(window.localStorage.getItem(key) === 'true');
+  }, [address]);
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
@@ -111,7 +113,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
         return;
       }
 
-      if (tokenAddress && tokenSpenderAddress && !hasApproved) {
+      if (tokenAddress && tokenSpenderAddress && !hasApproved && address) {
         try {
           await writeContractAsync({
             abi: ERC20_ABI,
@@ -120,8 +122,10 @@ export function ChatWindow({ className }: ChatWindowProps) {
             args: [tokenSpenderAddress, maxUint256],
           });
           setHasApproved(true);
+          // Store approval state per-wallet address
           if (typeof window !== 'undefined') {
-            window.localStorage.setItem('arc-token-approved', 'true');
+            const key = `arc-token-approved-${address.toLowerCase()}`;
+            window.localStorage.setItem(key, 'true');
           }
         } catch (error) {
           console.error('Approval failed:', error);

@@ -163,18 +163,67 @@ async def test_price_comparison(async_client: AsyncClient):
     assert "sources" in data
 
 
-def test_websocket_connection():
+def _get_sync_auth_token() -> tuple[str, str]:
+    """Get an auth token synchronously for WebSocket tests.
+
+    Returns (access_token, user_id) where user_id is the numeric ID from the JWT.
+    """
+    import base64
+    import json
+
     client = TestClient(app)
-    with client.websocket_connect("/ws/chat/test-user") as websocket:
+    email = f"wstest_{uuid4().hex}@example.com"
+    response = client.post(
+        "/auth/register",
+        json={"email": email, "password": "TestPassword123!"},
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to register: {response.text}")
+    data = response.json()
+    token = data["access_token"]
+
+    # Extract user_id from JWT payload (sub claim)
+    # JWT format: header.payload.signature
+    payload_b64 = token.split(".")[1]
+    # Add padding if needed
+    payload_b64 += "=" * (4 - len(payload_b64) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+    user_id = payload["sub"]
+
+    return token, user_id
+
+
+def test_websocket_connection():
+    """Test WebSocket connection with proper JWT authentication."""
+    token, user_id = _get_sync_auth_token()
+    client = TestClient(app)
+    # WebSocket requires token query param after Phase 3 security fix
+    with client.websocket_connect(f"/ws/chat/{user_id}?token={token}") as websocket:
         websocket.send_json({"type": "ping"})
         message = websocket.receive_json()
         assert message["type"] in {"pong", "ping"}
 
 
+def test_websocket_rejects_unauthenticated():
+    """Verify WebSocket closes connection without valid token."""
+    client = TestClient(app)
+    from starlette.websockets import WebSocketDisconnect
+
+    try:
+        with client.websocket_connect("/ws/chat/test-user") as websocket:
+            # Should not reach here - connection should be rejected
+            pytest.fail("WebSocket should reject unauthenticated connection")
+    except WebSocketDisconnect as e:
+        # 4001 = missing token, 4002 = invalid token
+        assert e.code in (4001, 4002), f"Expected 4001 or 4002, got {e.code}"
+
+
 @pytest.mark.skipif(os.getenv("TESTING") == "true", reason="requires live agent streaming")
 def test_websocket_streaming():
+    """Test WebSocket streaming with authentication."""
+    token, user_id = _get_sync_auth_token()
     client = TestClient(app)
-    with client.websocket_connect("/ws/chat/test-user") as websocket:
+    with client.websocket_connect(f"/ws/chat/{user_id}?token={token}") as websocket:
         websocket.send_json({"type": "message", "content": "Hello there"})
         received_done = False
         for _ in range(20):

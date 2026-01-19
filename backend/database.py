@@ -372,14 +372,14 @@ async def get_chat_history(session_id: int, limit: int = 50) -> list:
 
 
 async def save_generated_image(
-    user_id: int,
+    user_id: str,  # Accepts string to support wallet addresses and numeric IDs
     prompt: str,
     image_url: str,
     style: Optional[str] = None,
     aspect_ratio: Optional[str] = None,
     model: Optional[str] = None
 ) -> int:
-    """Save a generated image record."""
+    """Save a generated image record. user_id can be numeric ID or wallet address."""
     async with DatabaseSession() as session:
         await session.execute(
             """

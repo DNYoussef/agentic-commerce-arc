@@ -292,9 +292,11 @@ Format your responses clearly with sections when presenting multiple products or
             )
 
             # Save to database if user_id provided
+            # Note: user_id may be a wallet address (string) or integer ID
             if user_id and result.get("image_url"):
+                # Store as string to support both numeric IDs and wallet addresses
                 await save_generated_image(
-                    user_id=int(user_id),
+                    user_id=str(user_id),
                     prompt=prompt,
                     image_url=result["image_url"],
                     style=style,
@@ -449,7 +451,18 @@ Format your responses clearly with sections when presenting multiple products or
             if choice.message.tool_calls:
                 for tool_call in choice.message.tool_calls:
                     tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+
+                    # Safely parse tool arguments with error handling
+                    try:
+                        tool_args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"Failed to parse tool arguments for {tool_name}: {e}. "
+                            f"Raw args: {tool_call.function.arguments[:200]}"
+                        )
+                        # Return error instead of crashing
+                        result["message"] = f"Error processing tool call: invalid arguments for {tool_name}"
+                        continue
 
                     # Execute tool
                     tool_result = await self._execute_tool(

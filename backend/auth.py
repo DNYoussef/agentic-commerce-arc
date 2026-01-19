@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -29,7 +29,15 @@ from database import get_user_by_email, get_user_by_id, create_user
 logger = logging.getLogger(__name__)
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    if os.getenv("TESTING") == "true":
+        SECRET_KEY = "test-secret-key-do-not-use-in-production"
+    else:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable is required. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -81,6 +89,11 @@ class UserResponse(BaseModel):
     email: str
     wallet_address: Optional[str]
     created_at: str
+
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request body."""
+    refresh_token: str
 
 
 # =============================================================================
@@ -418,17 +431,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 
 async def get_current_user_optional(
-    token: Optional[str] = Depends(oauth2_scheme)
+    authorization: Optional[str] = Header(None)
 ) -> Optional[dict]:
     """
     Optionally get the current user (for endpoints that work with or without auth).
+    Uses Header directly to avoid OAuth2PasswordBearer auto-raising on missing token.
     """
-    if not token:
+    if not authorization:
         return None
 
+    # Parse Bearer token
+    if not authorization.startswith("Bearer "):
+        return None
+
+    token = authorization.split(" ", 1)[1]
+
     try:
-        return await get_current_user(token)
-    except HTTPException:
+        payload = jwt_auth.verify_token(token)
+        if payload is None or "sub" not in payload:
+            return None
+        return payload
+    except Exception:
         return None
 
 

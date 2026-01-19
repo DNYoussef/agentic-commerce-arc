@@ -53,8 +53,9 @@ export function ImageGenerator({ onUseImage }: ImageGeneratorProps) {
         throw new Error('Image generation failed');
       }
 
-      const data = (await response.json()) as { url?: string };
-      setImageUrl(data.url ?? null);
+      // Handle both url and image_url from backend (backend returns image_url)
+      const data = (await response.json()) as { url?: string; image_url?: string };
+      setImageUrl(data.url ?? data.image_url ?? null);
     } catch (error) {
       setErrorMessage('Unable to generate image. Please try again.');
     } finally {

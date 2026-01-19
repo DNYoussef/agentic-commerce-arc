@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useWallet } from '@/hooks/useWallet';
+import { useWallet, type UseWalletReturn } from '@/hooks/useWallet';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -29,6 +29,7 @@ export function WalletButton({ className }: WalletButtonProps) {
   const {
     isConnected,
     isConnecting,
+    address,
     formattedAddress,
     balance,
     isCorrectChain,
@@ -97,8 +98,9 @@ export function WalletButton({ className }: WalletButtonProps) {
 
         <DropdownMenuItem
           onClick={() => {
-            if (formattedAddress) {
-              navigator.clipboard.writeText(formattedAddress);
+            // Copy full address, not truncated formattedAddress
+            if (address) {
+              navigator.clipboard.writeText(address);
             }
           }}
           icon={<CopyIcon className="w-4 h-4" />}
@@ -107,7 +109,7 @@ export function WalletButton({ className }: WalletButtonProps) {
         </DropdownMenuItem>
 
         <DropdownMenuItem
-          onClick={() => window.open(`https://explorer-testnet.arc.tech/address/${formattedAddress}`, '_blank')}
+          onClick={() => window.open(`https://explorer-testnet.arc.tech/address/${address}`, '_blank')}
           icon={<ExternalLinkIcon className="w-4 h-4" />}
         >
           View in Explorer

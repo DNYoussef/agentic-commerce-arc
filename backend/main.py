@@ -20,7 +20,6 @@ from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
 from web3 import Web3
 
 from database import (
@@ -32,7 +31,7 @@ from database import (
     get_transaction_by_idempotency_key,
     update_transaction_status,
 )
-from auth import get_current_user, TokenResponse, UserCreate, UserLogin
+from auth import get_current_user, TokenResponse, UserCreate, UserLogin, RefreshTokenRequest
 from agent import CommerceAgent
 from blockchain import verify_escrow_transaction
 from universal_components import (
@@ -168,13 +167,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware - Security: Do not use wildcard with credentials
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+_cors_origins = [origin.strip() for origin in _cors_origins if origin.strip()]
+
+# Validate: wildcard with credentials is unsafe
+if "*" in _cors_origins and len(_cors_origins) == 1:
+    logger.warning(
+        "CORS_ORIGINS is set to wildcard (*). This is unsafe with credentials. "
+        "Set explicit origins in production: CORS_ORIGINS=https://yourdomain.com"
+    )
+    # In production, disable credentials with wildcard
+    _allow_credentials = os.getenv("TESTING") == "true"
+else:
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 
@@ -219,18 +232,17 @@ async def register(user_data: UserCreate, db=Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["Authentication"])
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get_db)):
-    """Login and get access token."""
+async def login(credentials: UserLogin, db=Depends(get_db)):
+    """Login and get access token. Accepts JSON body with email and password."""
     from auth import authenticate_user
-    user_login = UserLogin(email=form_data.username, password=form_data.password)
-    return await authenticate_user(user_login, db)
+    return await authenticate_user(credentials, db)
 
 
 @app.post("/auth/refresh", response_model=TokenResponse, tags=["Authentication"])
-async def refresh_token(refresh_token: str, db=Depends(get_db)):
-    """Refresh access token."""
+async def refresh_token(request: RefreshTokenRequest, db=Depends(get_db)):
+    """Refresh access token. Accepts JSON body with refresh_token."""
     from auth import refresh_access_token
-    return await refresh_access_token(refresh_token, db)
+    return await refresh_access_token(request.refresh_token, db)
 
 
 # ==============================================================================
@@ -509,6 +521,9 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
     """
     WebSocket endpoint for streaming chat.
 
+    SECURITY: Requires valid JWT token in query params (?token=xxx).
+    The user_id in the path must match the 'sub' claim in the token.
+
     Message format (incoming):
     {"type": "message", "content": "user message here"}
 
@@ -523,6 +538,41 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
     """
     connection_id = websocket.query_params.get("connection_id") or str(uuid4())
     heartbeat_task: Optional[asyncio.Task] = None
+
+    # CRITICAL SECURITY: Validate JWT token BEFORE accepting connection
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+
+    try:
+        from auth import get_jwt_auth
+        jwt_auth = get_jwt_auth()
+        payload = jwt_auth.verify_token(token)
+        if not payload:
+            await websocket.close(code=4002, reason="Invalid token")
+            return
+
+        authenticated_user_id = payload.get("sub")
+        if not authenticated_user_id:
+            await websocket.close(code=4002, reason="Invalid token payload")
+            return
+
+        # Verify user_id in path matches token (prevent impersonation)
+        # Allow both exact match and flexible comparison (int vs string)
+        if str(authenticated_user_id) != str(user_id):
+            logger.warning(
+                f"WebSocket user_id mismatch: path={user_id}, token={authenticated_user_id}"
+            )
+            await websocket.close(code=4003, reason="User ID mismatch")
+            return
+
+        # Use the authenticated user_id from token (trusted source)
+        user_id = str(authenticated_user_id)
+    except Exception as e:
+        logger.error(f"WebSocket auth failed: {e}")
+        await websocket.close(code=4002, reason="Authentication failed")
+        return
 
     try:
         await ws_manager.connect(websocket, connection_id, user_id)

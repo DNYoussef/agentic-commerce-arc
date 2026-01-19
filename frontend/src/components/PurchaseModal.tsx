@@ -6,7 +6,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { parseUnits, formatUnits } from 'viem';
+import { parseEther, formatUnits } from 'viem';
 import {
   useAccount,
   usePublicClient,
@@ -54,7 +54,8 @@ export function PurchaseModal({ product, onClose, onSuccess }: PurchaseModalProp
 
   const priceAmount = useMemo(() => {
     const value = Number(product.price);
-    return Number.isFinite(value) ? parseUnits(value.toString(), 6) : null;
+    // Use parseEther for native ETH escrow (18 decimals), not USDC (6 decimals)
+    return Number.isFinite(value) ? parseEther(value.toString()) : null;
   }, [product.price]);
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
@@ -157,7 +158,7 @@ export function PurchaseModal({ product, onClose, onSuccess }: PurchaseModalProp
               <p className="text-lg font-semibold text-white">{product.name}</p>
               <p className="text-sm text-gray-400">{product.description}</p>
               <p className="text-sm text-gray-300">
-                Price: {product.price} USDC
+                Price: {product.price} ETH
               </p>
               {gasEstimate && (
                 <p className="text-xs text-gray-500">
@@ -175,8 +176,8 @@ export function PurchaseModal({ product, onClose, onSuccess }: PurchaseModalProp
 
           <div className="rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-3 text-sm text-gray-300">
             {isApproved
-              ? 'USDC approval confirmed. Ready to purchase.'
-              : 'Approve USDC to enable this purchase.'}
+              ? 'Token approval confirmed. Ready to purchase with ETH.'
+              : 'Approve token spending to enable this purchase.'}
           </div>
         </div>
 
@@ -186,7 +187,7 @@ export function PurchaseModal({ product, onClose, onSuccess }: PurchaseModalProp
           </Button>
           {!isApproved && (
             <Button onClick={handleApprove} isLoading={status === 'approving'}>
-              Approve USDC
+              Approve Token
             </Button>
           )}
           {isApproved && (
