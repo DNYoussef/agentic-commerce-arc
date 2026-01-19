@@ -1,5 +1,7 @@
 # Agentic Commerce on Arc
 
+![Agentic Commerce Cover](docs/assets/cover-image.jpg)
+
 ## Canonical Status
 
 <!-- STATUS:START -->
