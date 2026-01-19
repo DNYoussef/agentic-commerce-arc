@@ -138,7 +138,7 @@ export default function HomePage() {
       <footer className="border-t border-gray-800/50 py-6">
         <div className="container mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-gray-500 text-sm">
-            2024 Agentic Commerce. Built on Arc blockchain.
+            2026 Agentic Commerce. Built on Arc blockchain.
           </p>
           <div className="flex items-center gap-4">
             <a
