@@ -6,8 +6,8 @@
 Canonical status from `2026-EXOSKELETON-STATUS.json`.
 
 Status: 95% (source: implementation-plan)
-Registry refreshed: 2026-01-14T07:37:15.658148+00:00
-Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=9af3bbc
+Registry refreshed: 2026-01-15T20:37:16.435423+00:00
+Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=224a87f
 <!-- STATUS:END -->
 
 

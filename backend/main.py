@@ -539,40 +539,40 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
     connection_id = websocket.query_params.get("connection_id") or str(uuid4())
     heartbeat_task: Optional[asyncio.Task] = None
 
-    # CRITICAL SECURITY: Validate JWT token BEFORE accepting connection
+    # Auth: Validate JWT token if provided, allow guests otherwise
     token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=4001, reason="Missing authentication token")
-        return
+    if token:
+        try:
+            from auth import get_jwt_auth
+            jwt_auth = get_jwt_auth()
+            payload = jwt_auth.verify_token(token)
+            if not payload:
+                await websocket.close(code=4002, reason="Invalid token")
+                return
 
-    try:
-        from auth import get_jwt_auth
-        jwt_auth = get_jwt_auth()
-        payload = jwt_auth.verify_token(token)
-        if not payload:
-            await websocket.close(code=4002, reason="Invalid token")
+            authenticated_user_id = payload.get("sub")
+            if not authenticated_user_id:
+                await websocket.close(code=4002, reason="Invalid token payload")
+                return
+
+            # Verify user_id in path matches token (prevent impersonation)
+            if str(authenticated_user_id) != str(user_id):
+                logger.warning(
+                    f"WebSocket user_id mismatch: path={user_id}, token={authenticated_user_id}"
+                )
+                await websocket.close(code=4003, reason="User ID mismatch")
+                return
+
+            # Use the authenticated user_id from token (trusted source)
+            user_id = str(authenticated_user_id)
+            logger.info(f"WebSocket authenticated: user_id={user_id}")
+        except Exception as e:
+            logger.error(f"WebSocket auth failed: {e}")
+            await websocket.close(code=4002, reason="Authentication failed")
             return
-
-        authenticated_user_id = payload.get("sub")
-        if not authenticated_user_id:
-            await websocket.close(code=4002, reason="Invalid token payload")
-            return
-
-        # Verify user_id in path matches token (prevent impersonation)
-        # Allow both exact match and flexible comparison (int vs string)
-        if str(authenticated_user_id) != str(user_id):
-            logger.warning(
-                f"WebSocket user_id mismatch: path={user_id}, token={authenticated_user_id}"
-            )
-            await websocket.close(code=4003, reason="User ID mismatch")
-            return
-
-        # Use the authenticated user_id from token (trusted source)
-        user_id = str(authenticated_user_id)
-    except Exception as e:
-        logger.error(f"WebSocket auth failed: {e}")
-        await websocket.close(code=4002, reason="Authentication failed")
-        return
+    else:
+        # Guest mode: use path user_id (for demo/hackathon)
+        logger.info(f"WebSocket guest connection: user_id={user_id}")
 
     try:
         await ws_manager.connect(websocket, connection_id, user_id)
