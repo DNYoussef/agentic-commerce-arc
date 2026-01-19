@@ -14,8 +14,8 @@ Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=224a87f
 > AI-powered autonomous commerce platform built on the Arc blockchain
 
 [![Deploy to Railway](https://railway.app/button.svg)](https://railway.app/template)
-[![Tests](https://github.com/yourusername/agentic-commerce-arc/actions/workflows/test.yml/badge.svg)](https://github.com/yourusername/agentic-commerce-arc/actions/workflows/test.yml)
-[![Contracts](https://github.com/yourusername/agentic-commerce-arc/actions/workflows/contracts.yml/badge.svg)](https://github.com/yourusername/agentic-commerce-arc/actions/workflows/contracts.yml)
+[![Tests](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/test.yml/badge.svg)](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/test.yml)
+[![Contracts](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/contracts.yml/badge.svg)](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/contracts.yml)
 
 ## Overview
 
@@ -65,7 +65,7 @@ Built for the [lablab.ai Agentic Commerce Hackathon](https://lablab.ai/event/age
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/agentic-commerce-arc.git
+git clone https://github.com/DNYoussef/agentic-commerce-arc.git
 cd agentic-commerce-arc
 ```
 
@@ -232,6 +232,18 @@ forge test -vvv
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Live Demo
+
+- **Frontend**: https://frontend-production-dd6f.up.railway.app/
+- **Backend API**: https://agentic-commerce-arc-production.up.railway.app/
+- **API Docs**: https://agentic-commerce-arc-production.up.railway.app/docs
+
+### Deployed Contract
+
+- **Contract Address**: `0x1D10c53dCa5931acdc8f6b8F9AA0ed674ae94171`
+- **Network**: Arc Testnet (Chain ID: 5042002)
+- **Agent Wallet**: `0x1845C11d20d1bBaBDD25753Fd2E380ec2c39C35F`
 
 ## Hackathon Links
 
