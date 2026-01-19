@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
@@ -493,6 +494,20 @@ Tool usage:
                             "product": tool_args.get("product_name")
                         })
 
+            # Fallback: force image generation for short product-like prompts
+            if not choice.message.tool_calls:
+                user_message = messages[-1].get("content", "") if messages else ""
+                if self._should_force_image(user_message):
+                    tool_result = await self._handle_generate_image(
+                        prompt=user_message,
+                        user_id=context.user_id
+                    )
+                    result["images"].append(tool_result)
+                    result["actions"].append({
+                        "type": "generate_image",
+                        "prompt": user_message
+                    })
+
             return result
 
         except APIError as e:
@@ -594,6 +609,12 @@ Tool usage:
                                 }
                             }
 
+            if not tool_calls and self._should_force_image(message):
+                tool_calls["fallback_generate_image"] = {
+                    "name": "generate_image",
+                    "args": json.dumps({"prompt": message})
+                }
+
             async for result in self._emit_tool_results(tool_calls, context):
                 yield result
 
@@ -610,7 +631,10 @@ Tool usage:
         tool_call: Any
     ) -> None:
         """Collect tool call arguments from streaming deltas."""
-        call_id = tool_call.id or f"call_{len(tool_calls)}"
+        call_id = tool_call.id
+        if not call_id:
+            call_index = getattr(tool_call, "index", None)
+            call_id = f"call_{call_index}" if call_index is not None else f"call_{len(tool_calls)}"
         if call_id not in tool_calls:
             tool_calls[call_id] = {"name": "", "args": ""}
 
@@ -657,6 +681,28 @@ Tool usage:
             return json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             return {}
+
+    @staticmethod
+    def _should_force_image(message: str) -> bool:
+        """Heuristic to force image generation for product-like prompts."""
+        text = message.strip().lower()
+        if not text or text.endswith("?"):
+            return False
+
+        # Skip explicit search/price/comparison intents
+        blocked = [
+            "price", "compare", "comparison", "search", "find", "buy",
+            "cost", "cheapest", "deal", "where", "how much",
+        ]
+        if any(word in text for word in blocked):
+            return False
+
+        # Require some alphabetic content and keep it short-ish
+        if not re.search(r"[a-z]", text):
+            return False
+
+        word_count = len(re.findall(r"\b\w+\b", text))
+        return word_count <= 12
 
     async def search_products(
         self,
