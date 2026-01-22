@@ -421,18 +421,17 @@ class ReplicateClient:
         height: int
     ) -> Dict[str, Any]:
         """Create a prediction on Replicate."""
-        # Create prediction
+        # Use model-based endpoint for official models (avoids version hash requirement)
+        # Format: /models/{owner}/{model}/predictions
         response = await self.client.post(
-            "/predictions",
+            f"/models/{model}/predictions",
             json={
-                "version": self._get_model_version(model),
                 "input": {
                     "prompt": prompt,
-                    "width": width,
-                    "height": height,
+                    "aspect_ratio": "1:1",  # Flux uses aspect_ratio instead of width/height
                     "num_outputs": 1,
-                    "guidance_scale": 7.5,
-                    "num_inference_steps": 4,  # Fast for Flux Schnell
+                    "output_format": "webp",
+                    "output_quality": 80,
                 }
             }
         )
