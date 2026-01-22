@@ -660,6 +660,7 @@ Tool usage:
             tool_calls[call_id]["name"] = tool_call.function.name
         if tool_call.function and tool_call.function.arguments:
             tool_calls[call_id]["args"] += tool_call.function.arguments
+            logger.debug(f"Accumulated args for {call_id}: {tool_calls[call_id]['args'][:100]}")
 
     async def _emit_tool_results(
         self,
@@ -667,11 +668,14 @@ Tool usage:
         context: AgentContext
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Execute tool calls and yield results."""
+        logger.info(f"Emitting results for {len(tool_calls)} tool calls: {list(tool_calls.keys())}")
         for call in tool_calls.values():
             tool_name = call.get("name")
+            raw_args = call.get("args", "")
+            logger.info(f"Tool {tool_name} raw args (len={len(raw_args)}): {raw_args[:200] if raw_args else 'EMPTY'}")
             if not tool_name:
                 continue
-            tool_args = self._safe_json_load(call.get("args", ""))
+            tool_args = self._safe_json_load(raw_args)
             try:
                 result = await self._execute_tool(tool_name, tool_args, context)
             except Exception as exc:
