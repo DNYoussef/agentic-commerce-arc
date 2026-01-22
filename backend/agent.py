@@ -278,13 +278,21 @@ Tool usage:
 
     async def _handle_generate_image(
         self,
-        prompt: str,
+        prompt: str = "",
         style: str = "product",
         aspect_ratio: str = "1:1",
         user_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """Handle image generation tool."""
+        # Defensive check for empty prompt
+        if not prompt or not prompt.strip():
+            logger.warning("generate_image called without prompt")
+            return {
+                "error": "No prompt provided for image generation",
+                "image_url": None,
+                "prompt": prompt
+            }
         logger.info(f"Generating image: prompt={prompt[:50]}..., style={style}")
 
         if self.replicate:
@@ -353,6 +361,16 @@ Tool usage:
         tool = next((t for t in self.tools if t.name == tool_name), None)
         if not tool:
             raise ValueError(f"Unknown tool: {tool_name}")
+
+        # Validate required parameters before execution
+        required_params = tool.parameters.get("required", [])
+        missing_params = [p for p in required_params if p not in tool_input]
+        if missing_params:
+            logger.warning(
+                f"Tool {tool_name} missing required params: {missing_params}. "
+                f"Received: {list(tool_input.keys())}"
+            )
+            return {"error": f"Missing required parameters: {missing_params}"}
 
         # Add context info to tool input
         if context:
