@@ -57,6 +57,7 @@ class AgentContext:
     wallet_address: Optional[str] = None
     preferences: Dict[str, Any] = field(default_factory=dict)
     history: List[Dict[str, str]] = field(default_factory=list)
+    last_message: Optional[str] = None  # Used as fallback for tool args
 
 
 class CommerceAgent:
@@ -564,7 +565,8 @@ Tool usage:
         """
         agent_context = AgentContext(
             user_id=user_id,
-            preferences=context or {}
+            preferences=context or {},
+            last_message=message  # Store for fallback in tool execution
         )
 
         if not self.client:
@@ -676,6 +678,12 @@ Tool usage:
             if not tool_name:
                 continue
             tool_args = self._safe_json_load(raw_args)
+
+            # FALLBACK: If generate_image has no prompt, use the user's original message
+            if tool_name == "generate_image" and not tool_args.get("prompt"):
+                if hasattr(context, 'last_message') and context.last_message:
+                    logger.info(f"Using context message as prompt fallback: {context.last_message[:50]}")
+                    tool_args["prompt"] = context.last_message
             try:
                 result = await self._execute_tool(tool_name, tool_args, context)
             except Exception as exc:
