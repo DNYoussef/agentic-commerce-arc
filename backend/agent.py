@@ -303,18 +303,21 @@ Tool usage:
                 aspect_ratio=aspect_ratio
             )
 
-            # Save to database if user_id provided
+            # Save to database if user_id provided (non-blocking)
             # Note: user_id may be a wallet address (string) or integer ID
             if user_id and result.get("image_url"):
-                # Store as string to support both numeric IDs and wallet addresses
-                await save_generated_image(
-                    user_id=str(user_id),
-                    prompt=prompt,
-                    image_url=result["image_url"],
-                    style=style,
-                    aspect_ratio=aspect_ratio,
-                    model=result.get("model")
-                )
+                try:
+                    await save_generated_image(
+                        user_id=str(user_id),
+                        prompt=prompt,
+                        image_url=result["image_url"],
+                        style=style,
+                        aspect_ratio=aspect_ratio,
+                        model=result.get("model")
+                    )
+                except Exception as db_err:
+                    # Log but don't fail - image was generated successfully
+                    logger.warning(f"Failed to save image to database: {db_err}")
 
             return result
         else:
