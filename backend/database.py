@@ -28,18 +28,20 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "./data/app.db")
 WAL_MODE = True
 BUSY_TIMEOUT = 5000  # 5 seconds
 
-# Global connection pool (simple implementation for SQLite)
-_db_connection: Optional[aiosqlite.Connection] = None
-_db_lock = asyncio.Lock()
+# COM-002: Use per-request connections instead of global shared connection
+# to ensure proper transaction isolation between concurrent requests
+_db_initialized = False
+_init_lock = asyncio.Lock()
 
 
 async def init_db():
     """
-    Initialize the database connection and create tables.
+    Initialize the database schema.
 
-    Enables WAL mode for better concurrency and creates the initial schema.
+    COM-002: Creates tables and sets WAL mode on first run only.
+    Subsequent connections will use per-request isolation.
     """
-    global _db_connection
+    global _db_initialized
 
     # Ensure data directory exists
     db_path = Path(DATABASE_PATH)
@@ -47,29 +49,33 @@ async def init_db():
 
     logger.info(f"Initializing database at {DATABASE_PATH}")
 
-    async with _db_lock:
-        if _db_connection is None:
-            _db_connection = await aiosqlite.connect(
+    async with _init_lock:
+        if not _db_initialized:
+            # Create a temporary connection just for initialization
+            conn = await aiosqlite.connect(
                 DATABASE_PATH,
                 timeout=BUSY_TIMEOUT / 1000,
             )
+            try:
+                # Enable WAL mode for better concurrency
+                if WAL_MODE:
+                    await conn.execute("PRAGMA journal_mode=WAL")
+                    await conn.execute("PRAGMA synchronous=NORMAL")
+                    await conn.execute("PRAGMA cache_size=10000")
+                    await conn.execute("PRAGMA temp_store=MEMORY")
+                    logger.info("WAL mode enabled")
 
-            # Enable WAL mode for better concurrency
-            if WAL_MODE:
-                await _db_connection.execute("PRAGMA journal_mode=WAL")
-                await _db_connection.execute("PRAGMA synchronous=NORMAL")
-                await _db_connection.execute("PRAGMA cache_size=10000")
-                await _db_connection.execute("PRAGMA temp_store=MEMORY")
-                logger.info("WAL mode enabled")
+                # Enable foreign keys
+                await conn.execute("PRAGMA foreign_keys=ON")
 
-            # Enable foreign keys
-            await _db_connection.execute("PRAGMA foreign_keys=ON")
+                # Create tables
+                await _create_tables(conn)
+                await conn.commit()
 
-            # Create tables
-            await _create_tables(_db_connection)
-            await _db_connection.commit()
-
-            logger.info("Database initialized successfully")
+                _db_initialized = True
+                logger.info("Database initialized successfully")
+            finally:
+                await conn.close()
 
 
 async def _create_tables(conn: aiosqlite.Connection):
@@ -209,44 +215,73 @@ async def _create_tables(conn: aiosqlite.Connection):
 
 
 async def close_db():
-    """Close the database connection."""
-    global _db_connection
+    """
+    Close/cleanup database resources.
 
-    async with _db_lock:
-        if _db_connection is not None:
-            await _db_connection.close()
-            _db_connection = None
-            logger.info("Database connection closed")
+    COM-002: With per-request connections, this is now a no-op for cleanup.
+    Individual connections are closed after each request.
+    """
+    global _db_initialized
+    _db_initialized = False
+    logger.info("Database cleanup complete")
 
 
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
     """
     FastAPI dependency that yields a database connection.
-    """
-    global _db_connection
 
-    if _db_connection is None:
+    COM-002: Creates a new connection per request for proper transaction isolation.
+    COM-003: Added rollback on exceptions before closing connection.
+    """
+    if not _db_initialized:
         await init_db()
 
-    yield _db_connection
+    conn = await aiosqlite.connect(
+        DATABASE_PATH,
+        timeout=BUSY_TIMEOUT / 1000,
+    )
+    await conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        yield conn
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await conn.close()
 
 
 @asynccontextmanager
 async def get_db_context() -> AsyncGenerator[aiosqlite.Connection, None]:
     """
     Async context manager for database access inside helper functions.
-    """
-    global _db_connection
 
-    if _db_connection is None:
+    COM-002: Creates a new connection per context for proper transaction isolation.
+    COM-003: Added rollback on exceptions before closing connection.
+    """
+    if not _db_initialized:
         await init_db()
 
-    yield _db_connection
+    conn = await aiosqlite.connect(
+        DATABASE_PATH,
+        timeout=BUSY_TIMEOUT / 1000,
+    )
+    await conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        yield conn
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await conn.close()
 
 
 class DatabaseSession:
     """
     Helper class for database operations with automatic commit/rollback.
+
+    COM-002: Each session now uses its own connection for proper isolation.
 
     Usage:
         async with DatabaseSession() as session:
@@ -258,25 +293,35 @@ class DatabaseSession:
         self.connection: Optional[aiosqlite.Connection] = None
         self.cursor: Optional[aiosqlite.Cursor] = None
         self.lastrowid: Optional[int] = None
+        self._owns_connection: bool = False
 
     async def __aenter__(self):
-        global _db_connection
-
-        if _db_connection is None:
+        if not _db_initialized:
             await init_db()
 
-        self.connection = _db_connection
+        # COM-002: Create dedicated connection for this session
+        self.connection = await aiosqlite.connect(
+            DATABASE_PATH,
+            timeout=BUSY_TIMEOUT / 1000,
+        )
+        await self.connection.execute("PRAGMA foreign_keys=ON")
+        self._owns_connection = True
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
-            # Rollback on error (SQLite handles this per-statement)
+            # Rollback on error
+            if self.connection:
+                await self.connection.rollback()
             logger.error(f"Database error: {exc_val}")
-            return False
+        else:
+            # Commit changes
+            if self.connection:
+                await self.connection.commit()
 
-        # Commit changes
-        if self.connection:
-            await self.connection.commit()
+        # COM-002: Close the dedicated connection
+        if self._owns_connection and self.connection:
+            await self.connection.close()
 
         return False
 
