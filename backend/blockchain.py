@@ -2,13 +2,17 @@
 Blockchain utilities for Arc transactions.
 
 Provides helpers for verifying escrow transactions on-chain.
+
+COM-005: Added graceful error handling for RPC failures.
 """
 
 import json
+import logging
 import os
 from typing import Any, Dict, Optional
 
 from web3 import Web3
+from web3.exceptions import TransactionNotFound, ContractLogicError
 
 # web3.py v7+ compatibility
 try:
@@ -17,6 +21,8 @@ try:
 except ImportError:
     from web3.middleware import geth_poa_middleware
     poa_middleware = geth_poa_middleware
+
+logger = logging.getLogger(__name__)
 
 ARC_RPC_URL = os.getenv("ALCHEMY_ARC_RPC") or os.getenv("ARC_RPC_URL") or "http://127.0.0.1:8545"
 
@@ -49,9 +55,27 @@ def verify_escrow_transaction(
     expected_seller: Optional[str] = None,
     expected_amount: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Verify an escrow transaction receipt and emitted event."""
-    w3 = get_web3()
-    receipt = w3.eth.get_transaction_receipt(tx_hash)
+    """
+    Verify an escrow transaction receipt and emitted event.
+
+    COM-005: Handles RPC failures gracefully instead of raising exceptions.
+    Returns pending/failed status with reason on error.
+    """
+    try:
+        w3 = get_web3()
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+    except TransactionNotFound:
+        # COM-005: Transaction not yet mined or invalid hash
+        logger.debug(f"Transaction not found: {tx_hash}")
+        return {"status": "pending", "verified": False, "reason": "tx_not_found"}
+    except ConnectionError as e:
+        # COM-005: RPC connection failed
+        logger.warning(f"RPC connection error for {tx_hash}: {e}")
+        return {"status": "pending", "verified": False, "reason": "rpc_connection_error"}
+    except Exception as e:
+        # COM-005: Catch other web3 exceptions (invalid hash format, etc.)
+        logger.warning(f"Error fetching transaction {tx_hash}: {e}")
+        return {"status": "pending", "verified": False, "reason": f"rpc_error: {type(e).__name__}"}
 
     if receipt is None:
         return {"status": "pending", "verified": False}
@@ -59,35 +83,44 @@ def verify_escrow_transaction(
     if receipt.status != 1:
         return {"status": "failed", "verified": False}
 
-    escrow_address = Web3.to_checksum_address(escrow_address)
-    if receipt.to and Web3.to_checksum_address(receipt.to) != escrow_address:
-        return {"status": "failed", "verified": False, "reason": "tx_to_mismatch"}
+    try:
+        escrow_address = Web3.to_checksum_address(escrow_address)
+        if receipt.to and Web3.to_checksum_address(receipt.to) != escrow_address:
+            return {"status": "failed", "verified": False, "reason": "tx_to_mismatch"}
 
-    contract = w3.eth.contract(address=escrow_address, abi=ESCROW_ABI)
-    events = contract.events.EscrowCreated().process_receipt(receipt)
-    if not events:
-        return {"status": "failed", "verified": False, "reason": "missing_event"}
+        contract = w3.eth.contract(address=escrow_address, abi=ESCROW_ABI)
+        events = contract.events.EscrowCreated().process_receipt(receipt)
+        if not events:
+            return {"status": "failed", "verified": False, "reason": "missing_event"}
 
-    event = events[0]
-    buyer = Web3.to_checksum_address(event["args"]["buyer"])
-    seller = Web3.to_checksum_address(event["args"]["seller"])
-    amount = int(event["args"]["amount"])
+        event = events[0]
+        buyer = Web3.to_checksum_address(event["args"]["buyer"])
+        seller = Web3.to_checksum_address(event["args"]["seller"])
+        amount = int(event["args"]["amount"])
 
-    if expected_buyer and Web3.to_checksum_address(expected_buyer) != buyer:
-        return {"status": "failed", "verified": False, "reason": "buyer_mismatch"}
+        if expected_buyer and Web3.to_checksum_address(expected_buyer) != buyer:
+            return {"status": "failed", "verified": False, "reason": "buyer_mismatch"}
 
-    if expected_seller and Web3.to_checksum_address(expected_seller) != seller:
-        return {"status": "failed", "verified": False, "reason": "seller_mismatch"}
+        if expected_seller and Web3.to_checksum_address(expected_seller) != seller:
+            return {"status": "failed", "verified": False, "reason": "seller_mismatch"}
 
-    if expected_amount is not None and expected_amount != amount:
-        return {"status": "failed", "verified": False, "reason": "amount_mismatch"}
+        if expected_amount is not None and expected_amount != amount:
+            return {"status": "failed", "verified": False, "reason": "amount_mismatch"}
 
-    return {
-        "status": "confirmed",
-        "verified": True,
-        "escrow_id": str(event["args"]["escrowId"]),
-        "buyer": buyer,
-        "seller": seller,
-        "amount": amount,
-        "raw_event": json.loads(Web3.to_json(event["args"])),
-    }
+        return {
+            "status": "confirmed",
+            "verified": True,
+            "escrow_id": str(event["args"]["escrowId"]),
+            "buyer": buyer,
+            "seller": seller,
+            "amount": amount,
+            "raw_event": json.loads(Web3.to_json(event["args"])),
+        }
+    except ContractLogicError as e:
+        # COM-005: Contract execution error
+        logger.warning(f"Contract error for {tx_hash}: {e}")
+        return {"status": "failed", "verified": False, "reason": f"contract_error: {str(e)}"}
+    except Exception as e:
+        # COM-005: Catch unexpected errors during event processing
+        logger.error(f"Unexpected error verifying {tx_hash}: {e}")
+        return {"status": "failed", "verified": False, "reason": f"verification_error: {type(e).__name__}"}
