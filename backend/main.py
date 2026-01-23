@@ -22,6 +22,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
 
+import aiosqlite
+
 from database import (
     init_db,
     close_db,
@@ -381,15 +383,44 @@ async def verify_transaction(
         }
     )
 
-    await create_transaction(
-        user_id=user_id,
-        tx_hash=payload.tx_hash,
-        tx_type=TransactionType.PURCHASE.value,
-        status=status_value,
-        amount=payload.amount,
-        idempotency_key=payload.idempotency_key,
-        metadata=metadata,
-    )
+    # COM-004: Use try/except to handle race conditions atomically.
+    # If another request inserted the same tx_hash or idempotency_key between
+    # our checks and this insert, catch the IntegrityError and return existing.
+    try:
+        await create_transaction(
+            user_id=user_id,
+            tx_hash=payload.tx_hash,
+            tx_type=TransactionType.PURCHASE.value,
+            status=status_value,
+            amount=payload.amount,
+            idempotency_key=payload.idempotency_key,
+            metadata=metadata,
+        )
+    except aiosqlite.IntegrityError:
+        # Race condition: another request inserted the record
+        # Fetch and return the existing transaction
+        existing = await get_transaction_by_hash(payload.tx_hash)
+        if existing:
+            return TransactionVerifyResponse(
+                tx_hash=existing["tx_hash"],
+                status=TransactionStatus(existing["status"]),
+                verified=existing["status"] == TransactionStatus.CONFIRMED.value,
+                amount=existing.get("amount"),
+            )
+        # If not found by tx_hash, try idempotency_key
+        if payload.idempotency_key:
+            existing = await get_transaction_by_idempotency_key(payload.idempotency_key)
+            if existing:
+                return TransactionVerifyResponse(
+                    tx_hash=existing["tx_hash"],
+                    status=TransactionStatus(existing["status"]),
+                    verified=existing["status"] == TransactionStatus.CONFIRMED.value,
+                    amount=existing.get("amount"),
+                )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Transaction already exists with conflicting data."
+        )
 
     if status_value in {"confirmed", "failed"}:
         await update_transaction_status(payload.tx_hash, status_value, metadata=metadata)
