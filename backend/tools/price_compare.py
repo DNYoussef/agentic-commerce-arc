@@ -2,13 +2,15 @@
 Price Comparison Tool - Compare prices across multiple sources.
 
 Provides product price comparison across various e-commerce platforms
-with caching and rate limiting.
+with result caching.
 
 Features:
 - Multi-source price aggregation
 - Result caching with TTL
 - Best deal identification
 - Price history tracking
+
+COM-006: Removed false rate limiting claim; only caching is implemented.
 """
 
 import asyncio
