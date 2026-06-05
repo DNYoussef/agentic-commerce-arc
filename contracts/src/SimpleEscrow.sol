@@ -117,6 +117,7 @@ contract SimpleEscrow is ReentrancyGuard {
     ) external payable nonReentrant returns (uint256 escrowId) {
         // Validate inputs
         if (seller == address(0)) revert InvalidSeller();
+        if (seller == msg.sender) revert InvalidSeller();
         if (amount == 0) revert InvalidAmount();
         if (msg.value != amount) revert AmountMismatch();
 

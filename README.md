@@ -13,7 +13,7 @@ Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=224a87f
 <!-- STATUS:END -->
 
 
-> AI-powered autonomous commerce platform built on the Arc blockchain
+> AI-powered product-concept assistant with Arc escrow transaction support
 
 [![Deploy to Railway](https://railway.app/button.svg)](https://railway.app/template)
 [![Tests](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/test.yml/badge.svg)](https://github.com/DNYoussef/agentic-commerce-arc/actions/workflows/test.yml)
@@ -23,9 +23,14 @@ Signals: git=yes, tests=yes, ci=yes, readme=yes, last_commit=224a87f
 
 Agentic Commerce on Arc is an autonomous AI agent that can:
 - Generate product images using AI (Replicate)
-- Create and manage NFT listings on the Arc blockchain
-- Handle purchases and transactions autonomously
+- Search a local demo product catalog with filters, sorting, and limits
+- Verify and record Arc escrow transactions
 - Interact with users through natural language
+
+Current limitation: NFT minting, marketplace listings, and live retailer price
+quotes are not shipped in this build. Price comparison returns an explicit
+unavailable status unless `PRICE_COMPARE_MODE=demo` is deliberately enabled for
+synthetic UI exercises.
 
 Built for the [lablab.ai Agentic Commerce Hackathon](https://lablab.ai/event/agentic-commerce-on-arc).
 
@@ -151,19 +156,24 @@ agentic-commerce-arc/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| POST | `/api/generate` | Generate AI image |
-| POST | `/api/mint` | Mint NFT |
-| GET | `/api/listings` | Get all listings |
-| POST | `/api/purchase` | Purchase listing |
-| GET | `/api/agent/status` | Agent status |
+| POST | `/auth/register` | Register and receive tokens |
+| POST | `/auth/login` | Login and receive tokens |
+| POST | `/auth/refresh` | Refresh access token |
+| POST | `/chat` | Process an authenticated chat message |
+| POST | `/products/search` | Search the local demo catalog |
+| POST | `/products/compare` | Return live-price unavailable status or labeled demo prices |
+| POST | `/transactions/verify` | Verify an Arc escrow transaction |
+| POST | `/images/generate` | Generate an AI product image |
+| WS | `/ws/chat/{user_id}` | Authenticated streaming chat |
 
 ## Smart Contracts
 
-The platform uses the following contracts on Arc:
+The platform uses the following contract on Arc:
 
-- **AgentNFT.sol** - ERC721 for AI-generated products
-- **Marketplace.sol** - Listing and purchase logic
-- **AgentWallet.sol** - Autonomous agent wallet
+- **SimpleEscrow.sol** - ETH/ARC escrow between buyer and seller with release/refund logic
+
+No ERC721 NFT minting contract, marketplace contract, or autonomous agent wallet
+contract is present in this repository.
 
 ### Deploying Contracts
 
@@ -182,9 +192,11 @@ forge script script/Deploy.s.sol --rpc-url $ALCHEMY_ARC_RPC --broadcast --verify
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `REPLICATE_API_TOKEN` | Replicate API key | Yes |
-| `ALCHEMY_ARC_RPC` | Arc RPC endpoint | Yes |
+| `ALCHEMY_ARC_RPC` or `ARC_RPC_URL` | Arc RPC endpoint for transaction verification | Yes for chain verification |
 | `WALLETCONNECT_PROJECT_ID` | WalletConnect project ID | Yes |
-| `AGENT_PRIVATE_KEY` | Agent wallet private key | Yes |
+| `ESCROW_CONTRACT` / `NEXT_PUBLIC_ESCROW_CONTRACT` | Deployed SimpleEscrow contract address | Yes for purchase/verify flows |
+| `NEXT_PUBLIC_ESCROW_SELLER` | Seller address used by the demo purchase UI | Yes for purchase flow |
+| `PRICE_COMPARE_MODE` | Optional `demo` mode for labeled synthetic prices | No |
 | `DATABASE_URL` | Database connection string | No |
 
 ## Deployment
@@ -241,11 +253,11 @@ forge test -vvv
 - **Backend API**: https://agentic-commerce-arc-production.up.railway.app/
 - **API Docs**: https://agentic-commerce-arc-production.up.railway.app/docs
 
-### Deployed Contract
+### Deployed Escrow Contract
 
 - **Contract Address**: `0x1D10c53dCa5931acdc8f6b8F9AA0ed674ae94171`
 - **Network**: Arc Testnet (Chain ID: 5042002)
-- **Agent Wallet**: `0x1845C11d20d1bBaBDD25753Fd2E380ec2c39C35F`
+- **Contract Type**: `SimpleEscrow`
 
 ## Hackathon Links
 

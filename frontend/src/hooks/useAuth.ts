@@ -33,6 +33,7 @@ interface UseAuthReturn {
 }
 
 const STORAGE_KEY = 'arc-auth-tokens';
+const LEGACY_STORAGE_KEY = STORAGE_KEY;
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -51,8 +52,18 @@ function decodeToken(token: string): TokenPayload | null {
 function loadTokens(): AuthTokens | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as AuthTokens) : null;
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      return JSON.parse(raw) as AuthTokens;
+    }
+
+    const legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    if (!legacyRaw) return null;
+
+    window.sessionStorage.setItem(STORAGE_KEY, legacyRaw);
+    return JSON.parse(legacyRaw) as AuthTokens;
   } catch {
     return null;
   }
@@ -60,11 +71,12 @@ function loadTokens(): AuthTokens | null {
 
 function storeTokens(tokens: AuthTokens | null) {
   if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   if (!tokens) {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.sessionStorage.removeItem(STORAGE_KEY);
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tokens));
+  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(tokens));
 }
 
 function buildTokens(response: AuthResponse): AuthTokens {

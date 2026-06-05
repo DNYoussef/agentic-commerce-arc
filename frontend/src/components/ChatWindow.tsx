@@ -6,7 +6,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback, FormEvent } from 'react';
-import { parseEther, maxUint256 } from 'viem';
+import { parseEther } from 'viem';
 import { useWriteContract } from 'wagmi';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
@@ -83,11 +83,9 @@ export function ChatWindow({ className }: ChatWindowProps) {
     inputRef.current?.focus();
   }, []);
 
-  // Check approval state per-wallet address (approvals are wallet-specific)
+  // Approval state is session-only; never cache token allowance decisions.
   useEffect(() => {
-    if (typeof window === 'undefined' || !address) return;
-    const key = `arc-token-approved-${address.toLowerCase()}`;
-    setHasApproved(window.localStorage.getItem(key) === 'true');
+    setHasApproved(false);
   }, [address]);
 
   const handleSubmit = useCallback(
@@ -113,20 +111,23 @@ export function ChatWindow({ className }: ChatWindowProps) {
         return;
       }
 
+      const priceValue = Number(product.price);
+      if (!Number.isFinite(priceValue)) {
+        console.warn('Invalid product price:', product.price);
+        return;
+      }
+
+      const amount = parseEther(priceValue.toString());
+
       if (tokenAddress && tokenSpenderAddress && !hasApproved && address) {
         try {
           await writeContractAsync({
             abi: ERC20_ABI,
             address: tokenAddress,
             functionName: 'approve',
-            args: [tokenSpenderAddress, maxUint256],
+            args: [tokenSpenderAddress, amount],
           });
           setHasApproved(true);
-          // Store approval state per-wallet address
-          if (typeof window !== 'undefined') {
-            const key = `arc-token-approved-${address.toLowerCase()}`;
-            window.localStorage.setItem(key, 'true');
-          }
         } catch (error) {
           console.error('Approval failed:', error);
           return;
@@ -151,15 +152,8 @@ export function ChatWindow({ className }: ChatWindowProps) {
         return;
       }
 
-      const priceValue = Number(product.price);
-      if (!Number.isFinite(priceValue)) {
-        console.warn('Invalid product price:', product.price);
-        return;
-      }
-
       try {
         setPurchasingProductId(product.id);
-        const amount = parseEther(priceValue.toString());
 
         await writeContractAsync({
           abi: SIMPLE_ESCROW_ABI,
@@ -175,6 +169,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
       }
     },
     [
+      address,
       connect,
       defaultSellerAddress,
       escrowContractAddress,
@@ -242,7 +237,8 @@ export function ChatWindow({ className }: ChatWindowProps) {
               </h3>
               <p className="text-gray-400 max-w-md">
                 Describe the product you want and I&apos;ll generate a unique AI-created
-                item for you. You can then mint it as an NFT on the Arc blockchain.
+                item for you. You can inspect demo catalog items and purchase through
+                Arc escrow where configured; NFT minting is not shipped in this build.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 justify-center">

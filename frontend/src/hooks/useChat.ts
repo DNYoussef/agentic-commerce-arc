@@ -5,10 +5,12 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { generateId } from '@/lib/utils';
 import { useWebSocket, type WebSocketMessage } from './useWebSocket';
 import type { ChatMessage, ProductInfo } from '@/lib/api';
+
+const WEBSOCKET_AUTH_SUBPROTOCOL = 'arc.jwt';
 
 // ============ TYPES ============
 
@@ -52,7 +54,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(() => initialSessionId || generateId());
-  const [userId] = useState(() => initialUserId || walletAddress || sessionId);
+  const authenticatedUserId = useMemo(() => getJwtSubject(accessToken), [accessToken]);
+  const userId = authenticatedUserId || initialUserId || walletAddress || sessionId;
+  const websocketProtocols = useMemo(
+    () => (accessToken ? [WEBSOCKET_AUTH_SUBPROTOCOL, accessToken] : undefined),
+    [accessToken]
+  );
+  const websocketUrl = useMemo(
+    () => buildWebSocketUrl(wsUrl, userId, sessionId),
+    [sessionId, userId, wsUrl]
+  );
 
   const streamingMessageRef = useRef<ChatMessage | null>(null);
   const pendingProductsRef = useRef<ProductInfo[]>([]);
@@ -159,19 +170,19 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       type: 'init',
       sessionId,
       walletAddress,
-      token: accessToken ?? undefined,
     };
     send({
       ...initPayload,
     });
-  }, [accessToken, sessionId, walletAddress]);
+  }, [sessionId, walletAddress]);
 
   const handleError = useCallback(() => {
     setError('Connection lost. Trying to reconnect...');
   }, []);
 
   const { isConnected, send } = useWebSocket({
-    url: `${wsUrl.replace(/\/$/, '')}/${userId}?sessionId=${sessionId}${accessToken ? `&token=${accessToken}` : ''}`,
+    url: websocketUrl,
+    protocols: websocketProtocols,
     autoConnect: true,
     reconnect: true,
     onMessage: handleWebSocketMessage,
@@ -199,10 +210,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         sessionId,
         walletAddress,
         content: content.trim(),
-        token: accessToken ?? undefined,
       });
     },
-    [accessToken, send, sessionId, walletAddress]
+    [send, sessionId, walletAddress]
   );
 
   const clearMessages = useCallback(() => {
@@ -250,6 +260,30 @@ function normalizeProducts(products: ProductInfo[]): ProductInfo[] {
       product.imageUrl ||
       (product as { image_url?: string }).image_url,
   }));
+}
+
+function buildWebSocketUrl(wsUrl: string, userId: string, sessionId: string): string {
+  const baseUrl = wsUrl.replace(/\/$/, '');
+  const params = new URLSearchParams({ sessionId });
+  return `${baseUrl}/${encodeURIComponent(userId)}?${params.toString()}`;
+}
+
+function getJwtSubject(token: string | null | undefined): string | null {
+  if (!token) return null;
+
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      '='
+    );
+    const decoded = JSON.parse(atob(paddedPayload)) as { sub?: unknown };
+    return decoded.sub === undefined || decoded.sub === null ? null : String(decoded.sub);
+  } catch {
+    return null;
+  }
 }
 
 export default useChat;

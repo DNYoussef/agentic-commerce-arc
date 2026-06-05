@@ -80,6 +80,12 @@ contract SimpleEscrowTest is Test {
         escrow.createEscrow{value: ESCROW_AMOUNT}(address(0), ESCROW_AMOUNT);
     }
 
+    function test_CreateEscrow_RevertBuyerCannotBeSeller() public {
+        vm.prank(buyer);
+        vm.expectRevert(SimpleEscrow.InvalidSeller.selector);
+        escrow.createEscrow{value: ESCROW_AMOUNT}(buyer, ESCROW_AMOUNT);
+    }
+
     function test_CreateEscrow_RevertInvalidAmount() public {
         vm.prank(buyer);
         vm.expectRevert(SimpleEscrow.InvalidAmount.selector);
@@ -94,6 +100,7 @@ contract SimpleEscrowTest is Test {
 
     function testFuzz_CreateEscrow(address _seller, uint256 _amount) public {
         vm.assume(_seller != address(0));
+        vm.assume(_seller != buyer);
         vm.assume(_amount > 0 && _amount <= 10 ether);
 
         vm.deal(buyer, _amount);

@@ -34,6 +34,7 @@ export interface WebSocketMessage {
 
 export interface UseWebSocketOptions {
   url: string;
+  protocols?: string | string[];
   autoConnect?: boolean;
   reconnect?: boolean;
   reconnectInterval?: number;
@@ -60,6 +61,7 @@ export interface UseWebSocketReturn {
 export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const {
     url,
+    protocols,
     autoConnect = true,
     reconnect = true,
     reconnectInterval = 3000,
@@ -77,6 +79,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const isMountedRef = useRef(true);
 
   const clearReconnectTimeout = useCallback(() => {
@@ -108,11 +111,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     setStatus('connecting');
 
     try {
-      const ws = new WebSocket(url);
+      const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
 
       ws.onopen = () => {
         if (isMountedRef.current) {
           setStatus('connected');
+          reconnectAttemptsRef.current = 0;
           setReconnectAttempts(0);
           onConnect?.();
         }
@@ -124,14 +128,16 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
           onDisconnect?.();
 
           // Attempt reconnection
-          if (reconnect && reconnectAttempts < maxReconnectAttempts) {
+          const attempts = reconnectAttemptsRef.current;
+          if (reconnect && attempts < maxReconnectAttempts) {
             const delay = Math.min(
-              reconnectInterval * 2 ** reconnectAttempts,
+              reconnectInterval * 2 ** attempts,
               maxReconnectInterval
             );
             reconnectTimeoutRef.current = setTimeout(() => {
               if (isMountedRef.current) {
-                setReconnectAttempts((prev) => prev + 1);
+                reconnectAttemptsRef.current = attempts + 1;
+                setReconnectAttempts(reconnectAttemptsRef.current);
                 connect();
               }
             }, delay);
@@ -168,10 +174,11 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     }
   }, [
     url,
+    protocols,
     reconnect,
     reconnectInterval,
+    maxReconnectInterval,
     maxReconnectAttempts,
-    reconnectAttempts,
     onConnect,
     onDisconnect,
     onError,

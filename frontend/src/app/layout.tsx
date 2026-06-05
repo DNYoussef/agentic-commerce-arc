@@ -10,19 +10,19 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Agentic Commerce | AI-Powered Shopping on Arc',
-  description: 'Create unique AI-generated products and mint them as NFTs on the Arc blockchain. The future of personalized commerce.',
-  keywords: ['AI', 'NFT', 'blockchain', 'Arc', 'commerce', 'shopping', 'generative AI'],
+  description: 'Create AI-generated product concepts and test Arc escrow purchases. NFT minting is not shipped in this build.',
+  keywords: ['AI', 'blockchain', 'Arc', 'commerce', 'shopping', 'generative AI', 'escrow'],
   authors: [{ name: 'Agentic Commerce Team' }],
   openGraph: {
     title: 'Agentic Commerce | AI-Powered Shopping on Arc',
-    description: 'Create unique AI-generated products and mint them as NFTs on the Arc blockchain.',
+    description: 'Create AI-generated product concepts and test Arc escrow purchases. NFT minting is not shipped in this build.',
     type: 'website',
     locale: 'en_US',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Agentic Commerce | AI-Powered Shopping on Arc',
-    description: 'Create unique AI-generated products and mint them as NFTs on the Arc blockchain.',
+    description: 'Create AI-generated product concepts and test Arc escrow purchases. NFT minting is not shipped in this build.',
   },
   robots: {
     index: true,

@@ -132,16 +132,16 @@ export function ProductCard({
               isLoading={isPurchasing}
               disabled={isPurchasing}
             >
-              {isPurchasing ? 'Minting...' : 'Purchase'}
+              {isPurchasing ? 'Purchasing...' : 'Purchase'}
             </Button>
           </div>
         </div>
 
-        {/* NFT Badge */}
+        {/* Escrow Badge */}
         {product.contractAddress && (
           <div className="absolute top-3 right-3">
             <span className="px-2 py-1 text-xs font-medium bg-arc-primary/20 text-arc-primary rounded-full">
-              NFT
+              Escrow
             </span>
           </div>
         )}
@@ -152,7 +152,7 @@ export function ProductCard({
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>{product.name}</DialogTitle>
-            <DialogDescription>AI-Generated Product</DialogDescription>
+            <DialogDescription>Generated or demo catalog item</DialogDescription>
           </DialogHeader>
 
           <DialogBody className="space-y-4">
@@ -205,7 +205,7 @@ export function ProductCard({
           <DialogFooter>
             <DialogClose>Close</DialogClose>
             <Button onClick={handlePurchase} isLoading={isPurchasing}>
-              {isPurchasing ? 'Minting...' : `Purchase for ${product.price} ARC`}
+              {isPurchasing ? 'Purchasing...' : `Purchase for ${product.price} ARC`}
             </Button>
           </DialogFooter>
         </DialogContent>

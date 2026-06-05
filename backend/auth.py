@@ -29,15 +29,17 @@ from database import get_user_by_email, get_user_by_id, create_user
 logger = logging.getLogger(__name__)
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    if os.getenv("TESTING") == "true":
-        SECRET_KEY = "test-secret-key-do-not-use-in-production"
-    else:
+def _resolve_jwt_secret_key() -> str:
+    secret_key = os.getenv("JWT_SECRET_KEY")
+    if not secret_key:
         raise ValueError(
             "JWT_SECRET_KEY environment variable is required. "
             "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
         )
+    return secret_key
+
+
+SECRET_KEY = _resolve_jwt_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))

@@ -1,5 +1,9 @@
 # Agentic Commerce on Arc - Hackathon Submission Prep
 
+Status note: this prep file has been reconciled with the shipped code. The
+current build supports AI image generation, demo catalog search, and Arc escrow
+transactions. NFT minting and marketplace listings are not shipped.
+
 ## ARC-005: Cover Image (16:9 PNG)
 
 ### Nano Banana Prompt
@@ -14,7 +18,7 @@ Visual elements:
 - Arc logo integration space in corner
 - Gradient background: deep purple to electric blue
 - Holographic/iridescent product images being generated
-- NFT badges/tokens floating
+- Escrow/payment status badges floating
 - Clean, modern, tech-forward aesthetic
 
 Style: Futuristic digital art, 3D rendered feel, high contrast, vibrant colors
@@ -51,16 +55,16 @@ Futuristic AI shopping assistant robot surrounded by floating holographic produc
 **Autonomous AI Commerce Agent**
 - Describe what you want in natural language
 - AI generates unique product images instantly
-- One-click mint as NFT on Arc blockchain
-- Trade, collect, or redeem for physical goods
+- Optional Arc escrow purchase flow for configured demo items
+- NFT minting and marketplace listings are future work, not shipped
 
 ### Slide 4: How It Works
 **The Flow**
 1. User describes desired product via chat
 2. AI agent generates unique product image (Replicate FLUX)
-3. User approves and mints as NFT (one click)
-4. NFT listed on marketplace automatically
-5. Others can purchase or trade
+3. User can inspect demo catalog items and purchase through SimpleEscrow
+4. Transaction can be verified against the Arc escrow event
+5. Marketplace and NFT flows remain unimplemented
 
 ### Slide 5: Technology Stack
 **Built on Cutting-Edge Tech**
@@ -68,7 +72,7 @@ Futuristic AI shopping assistant robot surrounded by floating holographic produc
 - **Backend**: FastAPI + Python + WebSocket streaming
 - **Blockchain**: Arc (EVM-compatible, USDC gas)
 - **AI**: Replicate API (FLUX image generation)
-- **Smart Contracts**: Solidity (ERC721 + Marketplace)
+- **Smart Contracts**: Solidity (`SimpleEscrow`)
 
 ### Slide 6: Why Arc?
 **The Perfect Chain for Commerce**
@@ -85,10 +89,10 @@ Futuristic AI shopping assistant robot surrounded by floating holographic produc
 
 ### Slide 8: Business Model
 **Revenue Streams**
-- 2.5% marketplace fee on all trades
+- Future marketplace fee if a marketplace is built
 - Premium AI generation credits
 - Enterprise licensing for white-label deployments
-- Creator royalties on secondary sales
+- Creator royalties are future work; no royalty contract is shipped
 
 ### Slide 9: Call to Action
 **Join the Future of Commerce**

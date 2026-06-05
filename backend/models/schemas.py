@@ -127,6 +127,10 @@ class PriceSourceResult(BaseModel):
     in_stock: bool = Field(True, description="Availability")
     shipping: Optional[float] = Field(None, ge=0, description="Shipping cost")
     total: float = Field(..., ge=0, description="Total price with shipping")
+    evidence_status: Optional[str] = Field(
+        None,
+        description="Evidence label for demo or live quote status"
+    )
 
 
 class BestDeal(BaseModel):
@@ -140,6 +144,10 @@ class BestDeal(BaseModel):
     in_stock: bool = Field(True, description="Availability")
     savings: float = Field(0, description="Savings vs average")
     savings_percent: float = Field(0, description="Savings percentage")
+    evidence_status: Optional[str] = Field(
+        None,
+        description="Evidence label for the selected deal"
+    )
 
 
 class PriceComparisonResponse(BaseModel):
@@ -156,6 +164,11 @@ class PriceComparisonResponse(BaseModel):
     )
     fetched_at: str = Field(..., description="When prices were fetched")
     cached: bool = Field(False, description="Whether result was cached")
+    evidence_status: Optional[str] = Field(
+        None,
+        description="Whether prices are live, unavailable, or synthetic demo data"
+    )
+    message: Optional[str] = Field(None, description="Human-readable status detail")
 
 
 # =============================================================================

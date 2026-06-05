@@ -1,7 +1,7 @@
 # Agentic Commerce UI Code Analysis Context
 
 ## Project Overview
-AI-powered commerce platform for creating and minting NFT products on Arc blockchain.
+AI-powered commerce interface for creating product concepts and testing Arc escrow purchases.
 Tech stack: Next.js 14, React, TailwindCSS, wagmi (Web3)
 
 ## Color Palette (globals.css + tailwind.config.js)
@@ -139,4 +139,4 @@ Three main sections:
 - Loading spinner animation
 - Hover overlay with Quick View button
 - Price in arc-primary color
-- NFT badge (top-right, arc-primary/20 bg)
+- Escrow badge when a contract address is present

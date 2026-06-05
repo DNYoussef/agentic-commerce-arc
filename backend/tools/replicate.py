@@ -450,7 +450,12 @@ class ReplicateClient:
 
             if status["status"] == "succeeded":
                 output = status.get("output", [])
-                image_url = output[0] if output else None
+                if isinstance(output, str):
+                    image_url = output
+                else:
+                    image_url = output[0] if output else None
+                if not image_url:
+                    raise Exception("Prediction succeeded without an output image URL")
                 return {
                     "image_url": image_url,
                     "prompt": prompt,

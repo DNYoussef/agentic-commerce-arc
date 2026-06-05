@@ -197,8 +197,23 @@ def test_websocket_connection():
     """Test WebSocket connection with proper JWT authentication."""
     token, user_id = _get_sync_auth_token()
     client = TestClient(app)
-    # WebSocket requires token query param after Phase 3 security fix
-    with client.websocket_connect(f"/ws/chat/{user_id}?token={token}") as websocket:
+    with client.websocket_connect(
+        f"/ws/chat/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as websocket:
+        websocket.send_json({"type": "ping"})
+        message = websocket.receive_json()
+        assert message["type"] in {"pong", "ping"}
+
+
+def test_websocket_connection_with_auth_subprotocol():
+    """Test browser-compatible WebSocket JWT authentication."""
+    token, user_id = _get_sync_auth_token()
+    client = TestClient(app)
+    with client.websocket_connect(
+        f"/ws/chat/{user_id}",
+        subprotocols=["arc.jwt", token],
+    ) as websocket:
         websocket.send_json({"type": "ping"})
         message = websocket.receive_json()
         assert message["type"] in {"pong", "ping"}
@@ -218,12 +233,28 @@ def test_websocket_rejects_unauthenticated():
         assert e.code in (4001, 4002), f"Expected 4001 or 4002, got {e.code}"
 
 
+def test_websocket_rejects_query_string_token():
+    """Verify WebSocket JWTs are not accepted from URL query strings."""
+    token, user_id = _get_sync_auth_token()
+    client = TestClient(app)
+    from starlette.websockets import WebSocketDisconnect
+
+    try:
+        with client.websocket_connect(f"/ws/chat/{user_id}?token={token}") as websocket:
+            pytest.fail("WebSocket should reject token query parameters")
+    except WebSocketDisconnect as e:
+        assert e.code == 4001, f"Expected 4001, got {e.code}"
+
+
 @pytest.mark.skipif(os.getenv("TESTING") == "true", reason="requires live agent streaming")
 def test_websocket_streaming():
     """Test WebSocket streaming with authentication."""
     token, user_id = _get_sync_auth_token()
     client = TestClient(app)
-    with client.websocket_connect(f"/ws/chat/{user_id}?token={token}") as websocket:
+    with client.websocket_connect(
+        f"/ws/chat/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as websocket:
         websocket.send_json({"type": "message", "content": "Hello there"})
         received_done = False
         for _ in range(20):

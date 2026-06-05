@@ -13,12 +13,14 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
+import time
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
 
@@ -35,7 +37,7 @@ from database import (
 )
 from auth import get_current_user, TokenResponse, UserCreate, UserLogin, RefreshTokenRequest
 from agent import CommerceAgent
-from blockchain import verify_escrow_transaction
+from blockchain import InvalidTransactionHash, normalize_tx_hash, verify_escrow_transaction
 from universal_components import (
     init_connascence_bridge,
     init_memory_client,
@@ -87,9 +89,10 @@ class ConnectionManager:
         websocket: WebSocket,
         connection_id: str,
         user_id: Optional[str] = None,
+        subprotocol: Optional[str] = None,
     ):
         """Accept and register a WebSocket connection."""
-        await websocket.accept()
+        await websocket.accept(subprotocol=subprotocol)
 
         async with self._lock:
             self._connections[connection_id] = websocket
@@ -137,6 +140,50 @@ class ConnectionManager:
 # Global instances
 ws_manager = ConnectionManager()
 commerce_agent: Optional[CommerceAgent] = None
+_rate_limit_buckets: Dict[str, Deque[float]] = defaultdict(deque)
+
+
+def _rate_limit_key(request: Request, scope: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{scope}:{client_host}"
+
+
+def _consume_rate_limit(request: Request, scope: str, max_requests: int, window_seconds: int) -> None:
+    now = time.monotonic()
+    cutoff = now - window_seconds
+    bucket = _rate_limit_buckets[_rate_limit_key(request, scope)]
+
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+
+    if len(bucket) >= max_requests:
+        retry_after = max(1, int(window_seconds - (now - bucket[0])))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    bucket.append(now)
+
+
+async def auth_rate_limit(request: Request) -> None:
+    _consume_rate_limit(request, "auth", max_requests=10, window_seconds=60)
+
+
+async def paid_api_rate_limit(request: Request) -> None:
+    _consume_rate_limit(request, "paid-api", max_requests=5, window_seconds=60)
+
+
+def _current_user_id(current_user: dict) -> int:
+    """Return the numeric database user id from an authenticated JWT payload."""
+    try:
+        return int(str(current_user.get("sub")))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user subject must be a numeric database id.",
+        )
 
 
 @asynccontextmanager
@@ -169,20 +216,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware - Security: Do not use wildcard with credentials
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-_cors_origins = [origin.strip() for origin in _cors_origins if origin.strip()]
+# CORS middleware - Security: never combine wildcard origins with credentials.
+def _split_cors_origins(value: str) -> list[str]:
+    return [origin.strip() for origin in value.split(",") if origin.strip() and origin.strip() != "*"]
 
-# Validate: wildcard with credentials is unsafe
-if "*" in _cors_origins and len(_cors_origins) == 1:
-    logger.warning(
-        "CORS_ORIGINS is set to wildcard (*). This is unsafe with credentials. "
-        "Set explicit origins in production: CORS_ORIGINS=https://yourdomain.com"
-    )
-    # In production, disable credentials with wildcard
-    _allow_credentials = os.getenv("TESTING") == "true"
-else:
-    _allow_credentials = True
+
+def _build_cors_origins() -> list[str]:
+    origins = _split_cors_origins(os.getenv("CORS_ORIGINS", "http://localhost:3000"))
+    origins.extend(_split_cors_origins(os.getenv("FRONTEND_ORIGIN", "")))
+    origins.extend(_split_cors_origins(os.getenv("NEXT_PUBLIC_APP_URL", "")))
+
+    for domain_env in ("FRONTEND_PUBLIC_DOMAIN", "RAILWAY_PUBLIC_DOMAIN"):
+        domain = os.getenv(domain_env, "").strip()
+        if domain:
+            origins.append(f"https://{domain}")
+
+    return list(dict.fromkeys(origins))
+
+
+_cors_origins = _build_cors_origins()
+_allow_credentials = "*" not in _cors_origins
 
 app.add_middleware(
     CORSMiddleware,
@@ -227,21 +280,33 @@ async def root():
 # ==============================================================================
 
 @app.post("/auth/register", response_model=TokenResponse, tags=["Authentication"])
-async def register(user_data: UserCreate, db=Depends(get_db)):
+async def register(
+    user_data: UserCreate,
+    _: None = Depends(auth_rate_limit),
+    db=Depends(get_db),
+):
     """Register a new user."""
     from auth import register_user
     return await register_user(user_data, db)
 
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["Authentication"])
-async def login(credentials: UserLogin, db=Depends(get_db)):
+async def login(
+    credentials: UserLogin,
+    _: None = Depends(auth_rate_limit),
+    db=Depends(get_db),
+):
     """Login and get access token. Accepts JSON body with email and password."""
     from auth import authenticate_user
     return await authenticate_user(credentials, db)
 
 
 @app.post("/auth/refresh", response_model=TokenResponse, tags=["Authentication"])
-async def refresh_token(request: RefreshTokenRequest, db=Depends(get_db)):
+async def refresh_token(
+    request: RefreshTokenRequest,
+    _: None = Depends(auth_rate_limit),
+    db=Depends(get_db),
+):
     """Refresh access token. Accepts JSON body with refresh_token."""
     from auth import refresh_access_token
     return await refresh_access_token(request.refresh_token, db)
@@ -299,6 +364,8 @@ async def search_products(
         category=search.category,
         max_price=search.max_price,
         min_price=search.min_price,
+        sort_by=search.sort_by or "relevance",
+        limit=search.limit,
     )
 
     return [ProductResponse(**p) for p in results]
@@ -330,12 +397,19 @@ async def verify_transaction(
     current_user: dict = Depends(get_current_user),
 ):
     """Verify a transaction on-chain and store it with idempotency safeguards."""
-    user_id = int(current_user.get("sub"))
+    user_id = _current_user_id(current_user)
+    try:
+        tx_hash = normalize_tx_hash(payload.tx_hash)
+    except InvalidTransactionHash as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from None
 
     if payload.idempotency_key:
         existing = await get_transaction_by_idempotency_key(payload.idempotency_key)
         if existing:
-            if existing.get("tx_hash") != payload.tx_hash:
+            if existing.get("tx_hash") != tx_hash:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Idempotency key already used with different transaction."
@@ -347,7 +421,7 @@ async def verify_transaction(
                 amount=existing.get("amount"),
             )
 
-    existing_tx = await get_transaction_by_hash(payload.tx_hash)
+    existing_tx = await get_transaction_by_hash(tx_hash)
     if existing_tx:
         return TransactionVerifyResponse(
             tx_hash=existing_tx["tx_hash"],
@@ -368,7 +442,7 @@ async def verify_transaction(
         expected_amount = Web3.to_wei(payload.amount, "ether")
 
     verification = verify_escrow_transaction(
-        tx_hash=payload.tx_hash,
+        tx_hash=tx_hash,
         escrow_address=escrow_address,
         expected_buyer=payload.buyer,
         expected_seller=payload.seller,
@@ -389,7 +463,7 @@ async def verify_transaction(
     try:
         await create_transaction(
             user_id=user_id,
-            tx_hash=payload.tx_hash,
+            tx_hash=tx_hash,
             tx_type=TransactionType.PURCHASE.value,
             status=status_value,
             amount=payload.amount,
@@ -399,7 +473,7 @@ async def verify_transaction(
     except aiosqlite.IntegrityError:
         # Race condition: another request inserted the record
         # Fetch and return the existing transaction
-        existing = await get_transaction_by_hash(payload.tx_hash)
+        existing = await get_transaction_by_hash(tx_hash)
         if existing:
             return TransactionVerifyResponse(
                 tx_hash=existing["tx_hash"],
@@ -423,10 +497,10 @@ async def verify_transaction(
         )
 
     if status_value in {"confirmed", "failed"}:
-        await update_transaction_status(payload.tx_hash, status_value, metadata=metadata)
+        await update_transaction_status(tx_hash, status_value, metadata=metadata)
 
     return TransactionVerifyResponse(
-        tx_hash=payload.tx_hash,
+        tx_hash=tx_hash,
         status=TransactionStatus(status_value),
         verified=verification.get("verified", False),
         escrow_id=verification.get("escrow_id"),
@@ -444,6 +518,7 @@ async def verify_transaction(
 @app.post("/images/generate", response_model=ImageGenerationResponse, tags=["Images"])
 async def generate_image(
     request: ImageGenerationRequest,
+    _: None = Depends(paid_api_rate_limit),
     current_user: dict = Depends(get_current_user),
 ):
     """Generate product image using Replicate."""
@@ -547,12 +622,81 @@ async def _heartbeat(websocket: WebSocket, interval: int = 20) -> None:
         await _send_ws(websocket, {"type": "ping"})
 
 
+WEBSOCKET_AUTH_SUBPROTOCOL = "arc.jwt"
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Extract a Bearer token from an Authorization header value."""
+    if not authorization:
+        return None
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _extract_websocket_token(websocket: WebSocket) -> tuple[Optional[str], Optional[str]]:
+    """Extract WebSocket JWT from headers without accepting URL query tokens."""
+    header_token = _extract_bearer_token(websocket.headers.get("authorization"))
+    if header_token:
+        return header_token, None
+
+    requested_protocols = [
+        protocol.strip()
+        for protocol in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if protocol.strip()
+    ]
+    if WEBSOCKET_AUTH_SUBPROTOCOL in requested_protocols:
+        token_index = requested_protocols.index(WEBSOCKET_AUTH_SUBPROTOCOL) + 1
+        if token_index < len(requested_protocols):
+            return requested_protocols[token_index], WEBSOCKET_AUTH_SUBPROTOCOL
+
+    return None, None
+
+
+async def _authenticate_websocket(websocket: WebSocket, path_user_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Authenticate a WebSocket handshake and return trusted user id/subprotocol."""
+    token, subprotocol = _extract_websocket_token(websocket)
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return None, None
+
+    try:
+        from auth import get_jwt_auth
+
+        jwt_auth = get_jwt_auth()
+        payload = jwt_auth.verify_token(token)
+        if not payload:
+            await websocket.close(code=4002, reason="Invalid token")
+            return None, None
+
+        authenticated_user_id = payload.get("sub")
+        if not authenticated_user_id:
+            await websocket.close(code=4002, reason="Invalid token payload")
+            return None, None
+
+        if str(authenticated_user_id) != str(path_user_id):
+            logger.warning(
+                f"WebSocket user_id mismatch: path={path_user_id}, token={authenticated_user_id}"
+            )
+            await websocket.close(code=4003, reason="User ID mismatch")
+            return None, None
+
+        logger.info(f"WebSocket authenticated: user_id={authenticated_user_id}")
+        return str(authenticated_user_id), subprotocol
+    except Exception as e:
+        logger.error(f"WebSocket auth failed: {e}")
+        await websocket.close(code=4002, reason="Authentication failed")
+        return None, None
+
+
 @app.websocket("/ws/chat/{user_id}")
 async def websocket_chat(websocket: WebSocket, user_id: str):
     """
     WebSocket endpoint for streaming chat.
 
-    SECURITY: Requires valid JWT token in query params (?token=xxx).
+    SECURITY: Requires valid JWT via Authorization header or WebSocket subprotocol.
     The user_id in the path must match the 'sub' claim in the token.
 
     Message format (incoming):
@@ -569,48 +713,36 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
     """
     connection_id = websocket.query_params.get("connection_id") or str(uuid4())
     heartbeat_task: Optional[asyncio.Task] = None
+    stream_task: Optional[asyncio.Task] = None
 
-    # Auth: Validate JWT token if provided, allow guests otherwise
-    token = websocket.query_params.get("token")
-    if token:
-        try:
-            from auth import get_jwt_auth
-            jwt_auth = get_jwt_auth()
-            payload = jwt_auth.verify_token(token)
-            if not payload:
-                await websocket.close(code=4002, reason="Invalid token")
-                return
-
-            authenticated_user_id = payload.get("sub")
-            if not authenticated_user_id:
-                await websocket.close(code=4002, reason="Invalid token payload")
-                return
-
-            # Verify user_id in path matches token (prevent impersonation)
-            if str(authenticated_user_id) != str(user_id):
-                logger.warning(
-                    f"WebSocket user_id mismatch: path={user_id}, token={authenticated_user_id}"
-                )
-                await websocket.close(code=4003, reason="User ID mismatch")
-                return
-
-            # Use the authenticated user_id from token (trusted source)
-            user_id = str(authenticated_user_id)
-            logger.info(f"WebSocket authenticated: user_id={user_id}")
-        except Exception as e:
-            logger.error(f"WebSocket auth failed: {e}")
-            await websocket.close(code=4002, reason="Authentication failed")
-            return
-    else:
-        # Guest mode: use path user_id (for demo/hackathon)
-        logger.info(f"WebSocket guest connection: user_id={user_id}")
+    authenticated_user_id, subprotocol = await _authenticate_websocket(websocket, user_id)
+    if not authenticated_user_id:
+        return
+    user_id = authenticated_user_id
 
     try:
-        await ws_manager.connect(websocket, connection_id, user_id)
+        await ws_manager.connect(websocket, connection_id, user_id, subprotocol=subprotocol)
         heartbeat_task = asyncio.create_task(_heartbeat(websocket))
 
         while True:
-            data = await websocket.receive_json()
+            receive_task = asyncio.create_task(websocket.receive_json())
+            wait_for = {receive_task}
+            if stream_task:
+                wait_for.add(stream_task)
+
+            done, pending = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+            if receive_task not in done:
+                receive_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await receive_task
+
+                if stream_task in done:
+                    await stream_task
+                    stream_task = None
+                    continue
+
+            data = await receive_task
             msg_type = data.get("type", "message")
             content = data.get("content", "")
             context = data.get("context", {})
@@ -632,7 +764,16 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
                 })
                 continue
 
-            await _stream_agent_response(websocket, user_id, content, context)
+            if stream_task and not stream_task.done():
+                await _send_ws(websocket, {
+                    "type": "error",
+                    "message": "A response is already streaming.",
+                })
+                continue
+
+            stream_task = asyncio.create_task(
+                _stream_agent_response(websocket, user_id, content, context)
+            )
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket {connection_id} disconnected")
@@ -648,6 +789,10 @@ async def websocket_chat(websocket: WebSocket, user_id: str):
     finally:
         if heartbeat_task:
             heartbeat_task.cancel()
+        if stream_task and not stream_task.done():
+            stream_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stream_task
         ws_manager.disconnect(connection_id, user_id)
 
 

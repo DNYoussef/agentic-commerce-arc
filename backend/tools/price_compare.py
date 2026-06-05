@@ -1,11 +1,13 @@
 """
-Price Comparison Tool - Compare prices across multiple sources.
+Price Comparison Tool.
 
-Provides product price comparison across various e-commerce platforms
-with result caching.
+Live retailer price integrations are not implemented in this repository. The
+default behavior is fail-closed with an explicit unavailable status. A local demo
+mode can be enabled for UI testing, and every demo result is labeled synthetic.
 
 Features:
-- Multi-source price aggregation
+- Explicit unavailable status when no live source is configured
+- Optional synthetic demo aggregation
 - Result caching with TTL
 - Best deal identification
 - Price history tracking
@@ -14,6 +16,7 @@ COM-006: Removed false rate limiting claim; only caching is implemented.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 from dataclasses import dataclass
@@ -28,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CACHE_TTL_MINUTES = int(os.getenv("PRICE_CACHE_TTL_MINUTES", "60"))
+PRICE_COMPARE_MODE = os.getenv("PRICE_COMPARE_MODE", "unavailable").strip().lower()
+DEMO_PRICE_EVIDENCE = "synthetic_demo_not_retailer_quote"
+UNAVAILABLE_EVIDENCE = "unavailable_no_retailer_integrations"
+
+
+def stable_hash_int(value: str) -> int:
+    """Return a deterministic integer hash for mock pricing calculations."""
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=False)
 
 
 @dataclass
@@ -53,25 +65,27 @@ class PriceResult:
 
 class PriceComparer:
     """
-    Compare prices across multiple e-commerce sources.
+    Compare prices when live sources are configured.
 
-    Aggregates prices from various sources and identifies the best deals.
-    Uses caching to reduce API calls and improve performance.
+    This build has no live retailer API integrations. By default it returns an
+    unavailable response rather than fabricated prices. Set
+    PRICE_COMPARE_MODE=demo to return labeled synthetic data for UI exercises.
     """
 
-    # Configured price sources (would be replaced with actual integrations)
+    # Demo-only sources. These names intentionally avoid real retailer branding.
     SOURCES = [
-        PriceSource("Amazon", "https://api.amazon.com"),
-        PriceSource("eBay", "https://api.ebay.com"),
-        PriceSource("Walmart", "https://api.walmart.com"),
-        PriceSource("BestBuy", "https://api.bestbuy.com"),
-        PriceSource("Target", "https://api.target.com"),
+        PriceSource("DemoMart", "demo://mart"),
+        PriceSource("SampleOutlet", "demo://outlet"),
+        PriceSource("PrototypeShop", "demo://shop"),
+        PriceSource("SandboxSupply", "demo://supply"),
+        PriceSource("ExampleRetail", "demo://retail"),
     ]
 
-    def __init__(self):
+    def __init__(self, mode: Optional[str] = None):
         self.cache: Dict[str, Dict[str, Any]] = {}
         self.cache_ttl = timedelta(minutes=CACHE_TTL_MINUTES)
         self.client: Optional[httpx.AsyncClient] = None
+        self.mode = (mode or PRICE_COMPARE_MODE or "unavailable").strip().lower()
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -96,6 +110,9 @@ class PriceComparer:
         Returns:
             Dict with sources, prices, and best deal information
         """
+        if self.mode not in {"demo", "synthetic_demo"}:
+            return self._unavailable_response(product_name, product_id)
+
         cache_key = f"{product_name}:{product_id or 'none'}"
 
         # Check cache
@@ -123,21 +140,35 @@ class PriceComparer:
                     "in_stock": r.in_stock,
                     "shipping": r.shipping,
                     "total": r.price + (r.shipping or 0) if include_shipping else r.price,
+                    "evidence_status": DEMO_PRICE_EVIDENCE,
                 }
                 for r in results
             ],
             "best_deal": best_deal,
             "fetched_at": datetime.utcnow().isoformat(),
-            "cached": False
+            "cached": False,
+            "evidence_status": DEMO_PRICE_EVIDENCE,
+            "message": "Synthetic demo prices only; no retailer quote was fetched.",
         }
 
         # Cache results
         self._set_cached(cache_key, response)
 
-        # Save to database for history
-        await self._save_to_database(product_name, product_id, results)
+        # Do not persist synthetic demo prices as price history.
 
         return response
+
+    def _unavailable_response(self, product_name: str, product_id: Optional[str]) -> Dict[str, Any]:
+        return {
+            "product_name": product_name,
+            "product_id": product_id,
+            "sources": [],
+            "best_deal": None,
+            "fetched_at": datetime.utcnow().isoformat(),
+            "cached": False,
+            "evidence_status": UNAVAILABLE_EVIDENCE,
+            "message": "Live retailer price comparison is not implemented in this build.",
+        }
 
     async def _fetch_all_prices(
         self,
@@ -171,11 +202,11 @@ class PriceComparer:
         """
         Fetch price from a single source.
 
-        Note: In production, this would integrate with actual retailer APIs.
-        For hackathon, we return mock data with realistic variations.
+        Demo mode returns synthetic values for UI exercises only. These are not
+        retailer quotes and must remain labeled as synthetic in API responses.
         """
         # Simulate API call delay
-        await asyncio.sleep(0.1 + (hash(source.name) % 10) / 100)
+        await asyncio.sleep(0.1 + (stable_hash_int(source.name) % 10) / 100)
 
         # Generate realistic mock prices based on product and source
         base_price = self._generate_base_price(product_name)
@@ -188,8 +219,8 @@ class PriceComparer:
             source=source.name,
             price=price,
             currency="USD",
-            url=f"https://{source.name.lower()}.com/search?q={product_name.replace(' ', '+')}",
-            in_stock=hash(f"{product_name}{source.name}") % 10 > 2,  # 80% in stock
+            url=None,
+            in_stock=stable_hash_int(f"{product_name}:{source.name}") % 10 > 2,  # 80% in stock
             shipping=shipping_cost,
             fetched_at=datetime.utcnow()
         )
@@ -197,7 +228,7 @@ class PriceComparer:
     def _generate_base_price(self, product_name: str) -> float:
         """Generate a base price based on product name."""
         # Use product name hash for consistent pricing
-        name_hash = abs(hash(product_name.lower()))
+        name_hash = stable_hash_int(product_name.lower())
 
         # Categorize by price range based on keywords
         expensive_keywords = ["luxury", "premium", "pro", "max", "ultra"]
@@ -217,22 +248,22 @@ class PriceComparer:
     def _get_source_price_variation(self, source_name: str) -> float:
         """Get price variation multiplier for a source."""
         variations = {
-            "Amazon": 1.0,      # Reference price
-            "eBay": 0.92,       # Often cheaper
-            "Walmart": 0.95,    # Slightly cheaper
-            "BestBuy": 1.05,    # Slightly more expensive
-            "Target": 1.02,     # About average
+            "DemoMart": 1.0,
+            "SampleOutlet": 0.92,
+            "PrototypeShop": 0.95,
+            "SandboxSupply": 1.05,
+            "ExampleRetail": 1.02,
         }
         return variations.get(source_name, 1.0)
 
     def _get_shipping_cost(self, source_name: str) -> Optional[float]:
         """Get typical shipping cost for a source."""
         shipping = {
-            "Amazon": 0.0,      # Free with Prime
-            "eBay": 5.99,       # Variable
-            "Walmart": 0.0,     # Free pickup
-            "BestBuy": 0.0,     # Free pickup
-            "Target": 5.99,     # Standard shipping
+            "DemoMart": 0.0,
+            "SampleOutlet": 5.99,
+            "PrototypeShop": 0.0,
+            "SandboxSupply": 0.0,
+            "ExampleRetail": 5.99,
         }
         return shipping.get(source_name, 7.99)
 
@@ -253,14 +284,13 @@ class PriceComparer:
 
         # Filter to in-stock items
         in_stock_results = [r for r in results if r.in_stock]
-        if not in_stock_results:
-            in_stock_results = results  # Fall back to all if none in stock
+        comparison_pool = in_stock_results or results  # Fall back to all if none in stock
 
         # Find minimum
-        best = min(in_stock_results, key=total_price)
+        best = min(comparison_pool, key=total_price)
 
-        # Calculate savings vs average
-        avg_price = sum(total_price(r) for r in results) / len(results)
+        # Calculate savings against comparable in-stock options only.
+        avg_price = sum(total_price(r) for r in comparison_pool) / len(comparison_pool)
         savings = avg_price - total_price(best)
 
         return {
@@ -272,7 +302,8 @@ class PriceComparer:
             "url": best.url,
             "in_stock": best.in_stock,
             "savings": round(savings, 2),
-            "savings_percent": round((savings / avg_price) * 100, 1) if avg_price > 0 else 0
+            "savings_percent": round((savings / avg_price) * 100, 1) if avg_price > 0 else 0,
+            "evidence_status": DEMO_PRICE_EVIDENCE,
         }
 
     def _get_cached(self, key: str) -> Optional[Dict[str, Any]]:

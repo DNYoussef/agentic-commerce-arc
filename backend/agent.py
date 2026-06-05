@@ -22,6 +22,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from openai import AsyncOpenAI, APIError
@@ -37,6 +38,79 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 MODEL_NAME = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+DEMO_PRODUCT_CATALOG: List[Dict[str, Any]] = [
+    {
+        "id": "demo_sneaker_001",
+        "name": "Futuristic Runner Sneaker",
+        "description": "Generated-concept sneaker for visual exploration; not a retailer listing.",
+        "price": 0.12,
+        "currency": "ARC",
+        "category": "footwear",
+        "image_url": "https://via.placeholder.com/300",
+        "source": "demo_catalog",
+        "rating": 4.6,
+        "reviews_count": 0,
+        "in_stock": False,
+        "url": None,
+    },
+    {
+        "id": "demo_jacket_001",
+        "name": "Cyberpunk Utility Jacket",
+        "description": "Generated-concept jacket for demo search and escrow flows.",
+        "price": 0.42,
+        "currency": "ARC",
+        "category": "apparel",
+        "image_url": "https://via.placeholder.com/300",
+        "source": "demo_catalog",
+        "rating": 4.2,
+        "reviews_count": 0,
+        "in_stock": False,
+        "url": None,
+    },
+    {
+        "id": "demo_watch_001",
+        "name": "Minimalist Arc Watch",
+        "description": "Generated-concept watch; demo data, not a live inventory result.",
+        "price": 0.21,
+        "currency": "ARC",
+        "category": "accessories",
+        "image_url": "https://via.placeholder.com/300",
+        "source": "demo_catalog",
+        "rating": 4.8,
+        "reviews_count": 0,
+        "in_stock": False,
+        "url": None,
+    },
+    {
+        "id": "demo_lamp_001",
+        "name": "Ambient Hologram Desk Lamp",
+        "description": "Generated-concept home object for demo catalog searches.",
+        "price": 0.16,
+        "currency": "ARC",
+        "category": "home",
+        "image_url": "https://via.placeholder.com/300",
+        "source": "demo_catalog",
+        "rating": 4.1,
+        "reviews_count": 0,
+        "in_stock": False,
+        "url": None,
+    },
+    {
+        "id": "demo_headphones_001",
+        "name": "Noise-Isolating Neon Headphones",
+        "description": "Generated-concept headphones for demo catalog filtering.",
+        "price": 0.33,
+        "currency": "ARC",
+        "category": "electronics",
+        "image_url": "https://via.placeholder.com/300",
+        "source": "demo_catalog",
+        "rating": 4.4,
+        "reviews_count": 0,
+        "in_stock": False,
+        "url": None,
+    },
+]
 
 
 @dataclass
@@ -68,29 +142,29 @@ class CommerceAgent:
     for product search, image generation, and price comparison.
     """
 
-    SYSTEM_PROMPT = """You are an AI-powered commerce agent for Agentic Commerce on Arc blockchain.
+    SYSTEM_PROMPT = """You are an AI-powered commerce assistant for Agentic Commerce on Arc blockchain.
 
 Your PRIMARY capability is IMAGE GENERATION. When users describe ANY product or item, you MUST:
 1. IMMEDIATELY use the generate_image tool to create a visualization
 2. Show them the generated product image
-3. Offer to mint it as an NFT on Arc blockchain
+3. Explain that NFT minting and marketplace listings are not shipped in this build
 
 Your capabilities:
 1. IMAGE GENERATION: Create product visualizations using AI (USE THIS FIRST!)
-2. PRODUCT SEARCH: Find similar existing products
-3. PRICE COMPARISON: Compare prices across sources
-4. NFT MINTING: Help users mint generated products as NFTs
+2. DEMO PRODUCT SEARCH: Search the local demo catalog with filters, sorting, and limits
+3. PRICE COMPARISON STATUS: Report that live retailer quotes are unavailable unless a configured provider is added
+4. ESCROW PURCHASE SUPPORT: Help users understand the configured Arc escrow purchase flow
 
 IMPORTANT RULES:
 - When a user describes ANY item (e.g., "rubber tutu", "glass purse", "neon sneakers"), ALWAYS generate an image first
 - Be proactive - don't ask "would you like me to generate an image?" - just DO IT
-- After generating, ask if they want to mint it as an NFT
+- Do not claim that NFT minting, marketplace listings, or live retailer price quotes are implemented
 - Keep responses brief and action-oriented
 
 Tool usage:
 - generate_image: Use for ANY product description (required for most conversations)
-- search_products: Use when user asks to find existing products
-- compare_prices: Use when user asks about pricing"""
+- search_products: Use when user asks to inspect the demo catalog
+- compare_prices: Use when user asks about pricing; it may return unavailable status"""
 
     def __init__(self):
         self.client: Optional[AsyncOpenAI] = None
@@ -156,6 +230,17 @@ Tool usage:
                         "min_price": {
                             "type": "number",
                             "description": "Minimum price filter (optional)"
+                        },
+                        "sort_by": {
+                            "type": "string",
+                            "enum": ["relevance", "price_asc", "price_desc", "rating"],
+                            "description": "Sort order for demo catalog results"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "description": "Maximum number of results to return"
                         }
                     },
                     "required": ["query"]
@@ -225,49 +310,36 @@ Tool usage:
         category: Optional[str] = None,
         max_price: Optional[float] = None,
         min_price: Optional[float] = None,
+        sort_by: str = "relevance",
+        limit: int = 20,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        """Handle product search tool."""
-        # For now, return mock data
-        # In production, integrate with actual product APIs
-        logger.info(f"Searching products: query={query}, category={category}")
+        """Search the local demo catalog with real filtering, sorting, and limits."""
+        logger.info(
+            "Searching demo catalog: query=%s, category=%s, sort_by=%s, limit=%s",
+            query,
+            category,
+            sort_by,
+            limit,
+        )
 
-        # Mock product results
-        products = [
-            {
-                "id": "prod_001",
-                "name": f"Premium {query.title()}",
-                "description": f"High-quality {query} with excellent features",
-                "price": 99.99,
-                "currency": "USD",
-                "category": category or "general",
-                "image_url": "https://via.placeholder.com/300",
-                "source": "agentic-commerce",
-                "rating": 4.5,
-            },
-            {
-                "id": "prod_002",
-                "name": f"Budget {query.title()}",
-                "description": f"Affordable {query} with good value",
-                "price": 49.99,
-                "currency": "USD",
-                "category": category or "general",
-                "image_url": "https://via.placeholder.com/300",
-                "source": "agentic-commerce",
-                "rating": 4.0,
-            },
-            {
-                "id": "prod_003",
-                "name": f"Luxury {query.title()}",
-                "description": f"Premium {query} with top-tier quality",
-                "price": 199.99,
-                "currency": "USD",
-                "category": category or "general",
-                "image_url": "https://via.placeholder.com/300",
-                "source": "agentic-commerce",
-                "rating": 4.8,
-            },
-        ]
+        limit = max(1, min(int(limit or 20), 100))
+        normalized_sort = sort_by if sort_by in {"relevance", "price_asc", "price_desc", "rating"} else "relevance"
+        query_terms = [term.lower() for term in re.findall(r"\w+", query or "")]
+
+        scored_products: List[tuple[int, Dict[str, Any]]] = []
+        for product in DEMO_PRODUCT_CATALOG:
+            if category and product["category"].lower() != category.lower():
+                continue
+
+            searchable = f"{product['name']} {product['description']} {product['category']}".lower()
+            relevance = sum(1 for term in query_terms if term in searchable)
+            if query_terms and relevance == 0:
+                continue
+
+            scored_products.append((relevance, dict(product)))
+
+        products = [product for _, product in scored_products]
 
         # Apply price filters
         if min_price is not None:
@@ -275,7 +347,17 @@ Tool usage:
         if max_price is not None:
             products = [p for p in products if p["price"] <= max_price]
 
-        return products
+        if normalized_sort == "price_asc":
+            products.sort(key=lambda p: (p["price"], p["name"]))
+        elif normalized_sort == "price_desc":
+            products.sort(key=lambda p: (-p["price"], p["name"]))
+        elif normalized_sort == "rating":
+            products.sort(key=lambda p: (-(p.get("rating") or 0), p["name"]))
+        else:
+            relevance_by_id = {product["id"]: score for score, product in scored_products}
+            products.sort(key=lambda p: (-relevance_by_id[p["id"]], p["name"]))
+
+        return products[:limit]
 
     async def _handle_generate_image(
         self,
@@ -344,15 +426,15 @@ Tool usage:
                 product_id=product_id
             )
         else:
-            # Mock response
             return {
                 "product_name": product_name,
-                "sources": [
-                    {"source": "Amazon", "price": 99.99, "url": "https://amazon.com"},
-                    {"source": "eBay", "price": 89.99, "url": "https://ebay.com"},
-                    {"source": "Walmart", "price": 94.99, "url": "https://walmart.com"},
-                ],
-                "best_deal": {"source": "eBay", "price": 89.99, "savings": 10.00}
+                "product_id": product_id,
+                "sources": [],
+                "best_deal": None,
+                "fetched_at": datetime.utcnow().isoformat(),
+                "cached": False,
+                "evidence_status": "unavailable_no_retailer_integrations",
+                "message": "Live retailer price comparison is not implemented in this build.",
             }
 
     async def _execute_tool(
@@ -742,14 +824,18 @@ Tool usage:
         query: str,
         category: Optional[str] = None,
         max_price: Optional[float] = None,
-        min_price: Optional[float] = None
+        min_price: Optional[float] = None,
+        sort_by: str = "relevance",
+        limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Direct product search (bypasses LLM)."""
         return await self._handle_search_products(
             query=query,
             category=category,
             max_price=max_price,
-            min_price=min_price
+            min_price=min_price,
+            sort_by=sort_by,
+            limit=limit,
         )
 
     async def compare_prices(self, product_id: str) -> Dict[str, Any]:

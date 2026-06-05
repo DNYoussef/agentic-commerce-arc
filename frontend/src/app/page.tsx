@@ -65,14 +65,14 @@ export default function HomePage() {
 
           {/* Sidebar */}
           <aside className="hidden lg:block space-y-6">
-            {/* Stats Card */}
+            {/* Capability Status */}
             <div className="glass rounded-xl p-6 space-y-4">
-              <h3 className="font-semibold text-white">Platform Stats</h3>
+              <h3 className="font-semibold text-white">Capability Status</h3>
               <div className="grid grid-cols-2 gap-4">
-                <StatCard label="Products Created" value="12,847" />
-                <StatCard label="NFTs Minted" value="8,234" />
-                <StatCard label="Total Volume" value="1.2M ARC" />
-                <StatCard label="Active Users" value="3,456" />
+                <StatCard label="Image Generation" value="Live" />
+                <StatCard label="Product Search" value="Demo Catalog" />
+                <StatCard label="Arc Purchase" value="Escrow" />
+                <StatCard label="NFT Minting" value="Not Shipped" />
               </div>
             </div>
 
@@ -101,7 +101,7 @@ export default function HomePage() {
                     3
                   </span>
                   <span className="text-gray-400 text-sm">
-                    Mint it as an NFT on Arc blockchain
+                    Purchase through Arc escrow when configured
                   </span>
                 </li>
                 <li className="flex gap-3">
@@ -109,7 +109,7 @@ export default function HomePage() {
                     4
                   </span>
                   <span className="text-gray-400 text-sm">
-                    Trade or redeem for physical goods
+                    NFT minting and marketplace listings are not shipped
                   </span>
                 </li>
               </ol>

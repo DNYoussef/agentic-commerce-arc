@@ -9,6 +9,7 @@ COM-005: Added graceful error handling for RPC failures.
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, Optional
 
 from web3 import Web3
@@ -25,6 +26,18 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 ARC_RPC_URL = os.getenv("ALCHEMY_ARC_RPC") or os.getenv("ARC_RPC_URL") or "http://127.0.0.1:8545"
+_TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+
+
+class InvalidTransactionHash(ValueError):
+    """Raised when a transaction hash is not a 32-byte hex value."""
+
+
+def normalize_tx_hash(tx_hash: str) -> str:
+    """Return a normalized 0x-prefixed transaction hash or raise."""
+    if not isinstance(tx_hash, str) or not _TX_HASH_RE.fullmatch(tx_hash):
+        raise InvalidTransactionHash("Transaction hash must be a 32-byte 0x-prefixed hex value.")
+    return tx_hash.lower()
 
 ESCROW_ABI = [
     {
@@ -61,6 +74,11 @@ def verify_escrow_transaction(
     COM-005: Handles RPC failures gracefully instead of raising exceptions.
     Returns pending/failed status with reason on error.
     """
+    try:
+        tx_hash = normalize_tx_hash(tx_hash)
+    except InvalidTransactionHash:
+        return {"status": "failed", "verified": False, "reason": "invalid_tx_hash"}
+
     try:
         w3 = get_web3()
         receipt = w3.eth.get_transaction_receipt(tx_hash)
