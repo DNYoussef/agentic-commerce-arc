@@ -1,0 +1,38 @@
+{
+  "analyzer": "god_object",
+  "path": "D:\\Projects\\agentic-commerce-arc",
+  "success": true,
+  "threshold": 15,
+  "violations": [
+    {
+      "description": "God Object detected: Class 'QualityValidator' has 21 methods (threshold: 15)",
+      "file_path": "D:\\Projects\\agentic-commerce-arc\\backend\\library\\components\\validation\\quality_validator\\quality_validator.py",
+      "id": "god_object_QualityValidator_quality_validator",
+      "line_number": 297,
+      "rule_id": "GOD_OBJECT_METHODS",
+      "severity": "high",
+      "type": "CoA",
+      "weight": 4.0
+    },
+    {
+      "description": "God Object detected: Class 'CheatcodesPrinter' has 27 methods (threshold: 15)",
+      "file_path": "D:\\Projects\\agentic-commerce-arc\\contracts\\lib\\forge-std\\scripts\\vm.py",
+      "id": "god_object_CheatcodesPrinter_vm",
+      "line_number": 408,
+      "rule_id": "GOD_OBJECT_METHODS",
+      "severity": "high",
+      "type": "CoA",
+      "weight": 4.0
+    },
+    {
+      "description": "God Object detected: Class 'CheatcodesPrinter' has 27 methods (threshold: 15)",
+      "file_path": "D:\\Projects\\agentic-commerce-arc\\contracts\\lib\\openzeppelin-contracts\\lib\\forge-std\\scripts\\vm.py",
+      "id": "god_object_CheatcodesPrinter_vm",
+      "line_number": 409,
+      "rule_id": "GOD_OBJECT_METHODS",
+      "severity": "high",
+      "type": "CoA",
+      "weight": 4.0
+    }
+  ]
+}
