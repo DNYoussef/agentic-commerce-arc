@@ -12,9 +12,15 @@ import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ProductCard } from '@/components/ProductCard';
 import { PurchaseModal } from '@/components/PurchaseModal';
-import type { ChatMessage, ProductInfo } from '@/lib/api';
+import { ChatMessageBubble } from '@/components/ChatMessageBubble';
+import { AlertIcon, CloseIcon, SparklesIcon } from '@/components/ChatIcons';
+import {
+  SUGGESTION_PROMPTS,
+  formatToolLabel,
+  shortenHash,
+} from '@/components/chatWindowFormat';
+import type { ProductInfo } from '@/lib/api';
 
 // ============ TYPES ============
 
@@ -182,7 +188,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
 
         {/* Message List */}
         {messages.map((message) => (
-          <MessageBubble
+          <ChatMessageBubble
             key={message.id}
             message={message}
             onPurchase={handlePurchase}
@@ -285,180 +291,6 @@ export function ChatWindow({ className }: ChatWindowProps) {
         />
       )}
     </div>
-  );
-}
-
-// ============ SUB-COMPONENTS ============
-
-interface MessageBubbleProps {
-  message: ChatMessage;
-  onPurchase: (product: ProductInfo) => void;
-  purchasingProductId: string | null;
-}
-
-function MessageBubble({
-  message,
-  onPurchase,
-  purchasingProductId,
-}: MessageBubbleProps) {
-  const isUser = message.role === 'user';
-
-  return (
-    <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      {/* Avatar - AI gets primary color to emphasize its responses */}
-      <div
-        className={cn(
-          'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
-          isUser ? 'bg-gray-800 border border-gray-700' : 'bg-arc-primary'
-        )}
-      >
-        {isUser ? (
-          <UserIcon className="w-4 h-4 text-gray-400" />
-        ) : (
-          <SparklesIcon className="w-4 h-4 text-white" />
-        )}
-      </div>
-
-      {/* Content */}
-      <div className={cn('flex-1 space-y-3', isUser && 'flex flex-col items-end')}>
-        <div
-          className={cn(
-            'rounded-xl px-4 py-3 max-w-[80%] inline-block',
-            isUser
-              ? 'bg-gray-800 text-white border border-gray-700'
-              : 'bg-arc-primary/10 text-white border border-arc-primary/20'
-          )}
-        >
-          <p className="whitespace-pre-wrap">{message.content}</p>
-        </div>
-
-        {/* Generated Image */}
-        {message.metadata?.imageUrl && (
-          <div className="rounded-xl overflow-hidden max-w-sm">
-            <img
-              src={message.metadata.imageUrl}
-              alt="Generated product"
-              className="w-full h-auto"
-            />
-          </div>
-        )}
-
-        {/* Products Grid */}
-        {message.metadata?.products && message.metadata.products.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
-            {message.metadata.products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onPurchase={onPurchase}
-                isPurchasing={purchasingProductId === product.id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============ CONSTANTS ============
-
-const SUGGESTION_PROMPTS = [
-  'Create a futuristic sneaker',
-  'Design a cyberpunk jacket',
-  'Generate abstract digital art',
-  'Create a minimalist watch',
-];
-
-function formatToolLabel(toolName: string) {
-  const normalized = toolName.replaceAll('_', ' ');
-  if (normalized.includes('search')) return 'search products';
-  if (normalized.includes('image') || normalized.includes('generate')) {
-    return 'generate image';
-  }
-  if (normalized.includes('compare')) return 'compare prices';
-  return normalized;
-}
-
-function shortenHash(hash: string) {
-  return hash.length > 14 ? `${hash.slice(0, 8)}...${hash.slice(-6)}` : hash;
-}
-
-// ============ ICONS ============
-
-function SparklesIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z" />
-    </svg>
-  );
-}
-
-function UserIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
-function AlertIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" />
-      <line x1="12" y1="16" x2="12.01" y2="16" />
-    </svg>
-  );
-}
-
-function CloseIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
   );
 }
 

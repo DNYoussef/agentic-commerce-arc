@@ -121,7 +121,12 @@ describe('ChatWindow purchase flow', () => {
       'utf8'
     );
 
+    expect(source.split(/\r?\n/).length).toBeLessThan(340);
     expect(source).toContain("import { PurchaseModal }");
+    expect(source).toContain("import { ChatMessageBubble }");
+    expect(source).not.toContain('function MessageBubble');
+    expect(source).not.toContain('function UserIcon');
+    expect(source).not.toContain('function SparklesIcon');
     expect(source).not.toContain('useWriteContract');
     expect(source).not.toContain('parseEther');
     expect(source).not.toContain('SIMPLE_ESCROW_ABI');
