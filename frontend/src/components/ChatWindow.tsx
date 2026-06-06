@@ -6,8 +6,6 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback, FormEvent } from 'react';
-import { parseEther } from 'viem';
-import { useWriteContract } from 'wagmi';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
 import { useAuth } from '@/hooks/useAuth';
@@ -15,6 +13,7 @@ import { useWallet } from '@/hooks/useWallet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ProductCard } from '@/components/ProductCard';
+import { PurchaseModal } from '@/components/PurchaseModal';
 import type { ChatMessage, ProductInfo } from '@/lib/api';
 
 // ============ TYPES ============
@@ -27,10 +26,8 @@ interface ChatWindowProps {
 
 export function ChatWindow({ className }: ChatWindowProps) {
   const [inputValue, setInputValue] = useState('');
-  const [purchasingProductId, setPurchasingProductId] = useState<string | null>(
-    null
-  );
-  const [hasApproved, setHasApproved] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductInfo | null>(null);
+  const [lastPurchaseTxHash, setLastPurchaseTxHash] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -58,21 +55,6 @@ export function ChatWindow({ className }: ChatWindowProps) {
     userId: address ?? 'guest',
     accessToken: tokens?.accessToken ?? null,
   });
-  const { writeContractAsync } = useWriteContract();
-
-  const escrowContractAddress = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as
-    | `0x${string}`
-    | undefined;
-  const defaultSellerAddress = process.env.NEXT_PUBLIC_ESCROW_SELLER as
-    | `0x${string}`
-    | undefined;
-  const tokenAddress = process.env.NEXT_PUBLIC_TOKEN_ADDRESS as
-    | `0x${string}`
-    | undefined;
-  const tokenSpenderAddress = process.env.NEXT_PUBLIC_TOKEN_SPENDER as
-    | `0x${string}`
-    | undefined;
-
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -82,11 +64,6 @@ export function ChatWindow({ className }: ChatWindowProps) {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  // Approval state is session-only; never cache token allowance decisions.
-  useEffect(() => {
-    setHasApproved(false);
-  }, [address]);
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
@@ -100,89 +77,32 @@ export function ChatWindow({ className }: ChatWindowProps) {
   );
 
   const handlePurchase = useCallback(
-    async (product: ProductInfo) => {
+    (product: ProductInfo) => {
       if (!isWalletConnected) {
         connect();
         return;
       }
 
       if (!isCorrectChain) {
-        await switchToArc();
+        void switchToArc();
         return;
       }
 
-      const priceValue = Number(product.price);
-      if (!Number.isFinite(priceValue)) {
-        console.warn('Invalid product price:', product.price);
-        return;
-      }
-
-      const amount = parseEther(priceValue.toString());
-
-      if (tokenAddress && tokenSpenderAddress && !hasApproved && address) {
-        try {
-          await writeContractAsync({
-            abi: ERC20_ABI,
-            address: tokenAddress,
-            functionName: 'approve',
-            args: [tokenSpenderAddress, amount],
-          });
-          setHasApproved(true);
-        } catch (error) {
-          console.error('Approval failed:', error);
-          return;
-        }
-      }
-
-      if (!escrowContractAddress) {
-        console.warn('Missing escrow contract address.');
-        return;
-      }
-
-      const sellerAddress =
-        (product as { sellerAddress?: `0x${string}` }).sellerAddress ??
-        defaultSellerAddress;
-
-      if (!sellerAddress) {
-        console.warn('Missing seller address for purchase.');
-        return;
-      }
-
-      if (purchasingProductId) {
-        return;
-      }
-
-      try {
-        setPurchasingProductId(product.id);
-
-        await writeContractAsync({
-          abi: SIMPLE_ESCROW_ABI,
-          address: escrowContractAddress,
-          functionName: 'createEscrow',
-          args: [sellerAddress, amount],
-          value: amount,
-        });
-      } catch (error) {
-        console.error('Purchase failed:', error);
-      } finally {
-        setPurchasingProductId(null);
-      }
+      setLastPurchaseTxHash(null);
+      setSelectedProduct(product);
     },
     [
-      address,
       connect,
-      defaultSellerAddress,
-      escrowContractAddress,
-      hasApproved,
       isWalletConnected,
       isCorrectChain,
-      purchasingProductId,
       switchToArc,
-      tokenAddress,
-      tokenSpenderAddress,
-      writeContractAsync,
     ]
   );
+
+  const handlePurchaseSuccess = useCallback((txHash: string) => {
+    setLastPurchaseTxHash(txHash);
+    setSelectedProduct(null);
+  }, []);
 
   const handleClearChat = useCallback(() => {
     clearMessages();
@@ -266,7 +186,7 @@ export function ChatWindow({ className }: ChatWindowProps) {
             key={message.id}
             message={message}
             onPurchase={handlePurchase}
-            purchasingProductId={purchasingProductId}
+            purchasingProductId={selectedProduct?.id ?? null}
           />
         ))}
 
@@ -325,6 +245,14 @@ export function ChatWindow({ className }: ChatWindowProps) {
           </div>
         )}
 
+        {lastPurchaseTxHash && (
+          <div className="flex items-center justify-center p-2">
+            <div className="px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg text-green-300 text-sm">
+              Purchase submitted: {shortenHash(lastPurchaseTxHash)}
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -348,6 +276,14 @@ export function ChatWindow({ className }: ChatWindowProps) {
           </Button>
         </div>
       </form>
+
+      {selectedProduct && (
+        <PurchaseModal
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onSuccess={handlePurchaseSuccess}
+        />
+      )}
     </div>
   );
 }
@@ -444,31 +380,9 @@ function formatToolLabel(toolName: string) {
   return normalized;
 }
 
-const SIMPLE_ESCROW_ABI = [
-  {
-    type: 'function',
-    name: 'createEscrow',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'seller', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: 'escrowId', type: 'uint256' }],
-  },
-];
-
-const ERC20_ABI = [
-  {
-    type: 'function',
-    name: 'approve',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: 'success', type: 'bool' }],
-  },
-];
+function shortenHash(hash: string) {
+  return hash.length > 14 ? `${hash.slice(0, 8)}...${hash.slice(-6)}` : hash;
+}
 
 // ============ ICONS ============
 
